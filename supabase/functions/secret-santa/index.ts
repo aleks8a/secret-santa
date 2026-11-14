@@ -244,6 +244,14 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // BLOCCO OBBLIGATORIO FINO AL CAMBIO PASSWORD
+    if (account.must_reset_password && action !== "change_password") {
+      return response({
+        error: "Devi cambiare la password prima di continuare",
+        must_reset_password: true,
+      }, 403);
+    }
+    
     // DATI ACCOUNT
     if (action === "whoami") {
       const { data: edition, error: editionError } =
