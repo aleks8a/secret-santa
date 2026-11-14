@@ -1,0 +1,217 @@
+
+:root {
+  --green: #15392e;
+  --green-light: #235b46;
+  --gold: #e8c985;
+  --cream: #faf7ef;
+  --text: #25392f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--cream);
+  color: var(--text);
+  font-family: Arial, sans-serif;
+}
+
+.hero {
+  background: var(--green);
+  color: white;
+  text-align: center;
+  padding: 48px 20px 55px;
+}
+
+.brand {
+  color: var(--gold);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.hero p {
+  color: #e8e3d5;
+  margin: 12px 0 20px;
+}
+
+.status {
+  display: inline-block;
+  border: 1px solid var(--gold);
+  border-radius: 30px;
+  padding: 8px 16px;
+  color: var(--gold);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.container {
+  width: min(100% - 28px, 540px);
+  margin: -25px auto 35px;
+  position: relative;
+}
+
+.panel {
+  background: white;
+  padding: 28px;
+  border-radius: 18px;
+  box-shadow: 0 8px 35px #193b2b15;
+}
+
+h1 {
+  font-size: 25px;
+  margin-top: 0;
+}
+
+h2 {
+  font-size: 19px;
+  margin-top: 25px;
+}
+
+.intro, .hint {
+  color: #718077;
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: bold;
+  margin: 19px 0 8px;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="url"] {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid #dce4dc;
+  border-radius: 9px;
+  font-size: 15px;
+  background: #fff;
+}
+
+input:focus {
+  outline: 2px solid var(--gold);
+  border-color: transparent;
+}
+
+.family-section {
+  margin-top: 28px;
+  padding: 17px;
+  background: #f1f5ef;
+  border-radius: 12px;
+}
+
+.check-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.check-label input {
+  width: 19px;
+  height: 19px;
+  accent-color: var(--green);
+}
+
+.child-card,
+.wishlist-card {
+  background: #fafaf7;
+  border: 1px solid #e3e9df;
+  padding: 16px;
+  border-radius: 10px;
+  margin-top: 15px;
+}
+
+.wishlist-card h3 {
+  font-size: 16px;
+  color: var(--green);
+  margin-top: 0;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  border: 0;
+  border-radius: 9px;
+  font-weight: bold;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 15px;
+}
+
+.primary {
+  background: var(--green);
+  color: white;
+}
+
+.secondary {
+  background: #e1ebe0;
+  color: var(--green);
+}
+
+.remove {
+  background: transparent;
+  color: #a33;
+  padding: 5px;
+  width: auto;
+}
+
+.gift-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: white;
+  padding: 10px;
+  border-radius: 8px;
+  margin-top: 8px;
+}
+
+.gift-row span {
+  flex: 1;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.notice {
+  margin-top: 22px;
+  padding: 14px;
+  border-radius: 9px;
+  background: #f6f2e6;
+  color: #675936;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#message {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+footer {
+  text-align: center;
+  color: #718077;
+  padding: 20px;
+  font-size: 12px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 480px) {
+  .panel {
+    padding: 21px;
+  }
+
+  .brand {
+    font-size: 24px;
+  }
+}
