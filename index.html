@@ -1,0 +1,73 @@
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15392e">
+  <title>Secret Santa 🎅</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">🎄 SECRET SANTA 🎄</div>
+    <p>La magia del Natale comincia qui</p>
+    <span class="status">PRE-ISCRIZIONI APERTE</span>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <h1>Partecipa al Secret Santa</h1>
+      <p class="intro">
+        Registrati, prepara la tua lista dei desideri
+        e aspetta la chiusura delle iscrizioni!
+      </p>
+
+      <form id="registrationForm">
+        <label for="name">Nome e cognome del genitore</label>
+        <input id="name" type="text"
+          placeholder="Es. Mario Rossi" required>
+
+        <label for="password">Password personale</label>
+        <input id="password" type="password"
+          placeholder="Scegli una password" minlength="10" required>
+
+        <div class="family-section">
+          <h2>👨‍👩‍👧‍👦 Gestione famiglia</h2>
+          <label class="check-label">
+            <input type="checkbox" id="hasChildren">
+            Sono genitore/tutore di figli minorenni
+          </label>
+
+          <div id="childrenArea" hidden>
+            <p>Inserisci il nome di ogni figlio.</p>
+            <div id="childrenList"></div>
+            <button type="button" id="addChild" class="secondary">
+              + Aggiungi un altro figlio
+            </button>
+          </div>
+        </div>
+
+        <div id="wishlists"></div>
+
+        <button type="submit" class="primary">
+          Conferma pre-iscrizione
+        </button>
+      </form>
+
+      <div class="notice">
+        🔒 Il Secret Santa verrà rivelato soltanto
+        dopo la chiusura delle iscrizioni.
+      </div>
+
+      <p id="message" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <footer>
+    ✨ Un regalo, una sorpresa, un Natale speciale ✨
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
