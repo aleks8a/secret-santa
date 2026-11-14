@@ -1,3 +1,4 @@
+
 name: Deploy Supabase Edge Function
 
 on:
@@ -32,5 +33,6 @@ jobs:
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: |
           supabase functions deploy secret-santa \
-            --project-ref "$SUPABASE_PROJECT_REF" \
-            --no-verify-jwt
+            --remote "$SUPABASE_PROJECT_REF" \
+            --no-verify-jwt \
+            --yes
