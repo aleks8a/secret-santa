@@ -65,6 +65,7 @@
       <h2>Estrazione Secret Santa 🎅</h2>
       <p class="intro" id="drawStatus"></p>
       <button type="button" id="drawButton" class="primary">Fai l'estrazione</button>
+      <button type="button" id="resetDrawButton" class="danger" hidden>Reset estrazione</button>
 
       <h2>Utenti</h2>
       <p class="intro">
@@ -104,6 +105,7 @@
     const usersList = document.getElementById("usersList");
     const tempBox = document.getElementById("tempBox");
     const drawButton = document.getElementById("drawButton");
+    const resetDrawButton = document.getElementById("resetDrawButton");
     const drawStatus = document.getElementById("drawStatus");
     const addUserForm = document.getElementById("addUserForm");
     const newChildren = document.getElementById("newChildren");
@@ -225,6 +227,7 @@
           ? "L'estrazione è stata fatta. Ripeterla cancella le assegnazioni e tutte le selezioni dei regali."
           : "L'estrazione non è ancora stata fatta. Falla quando tutti sono iscritti: nessuno pesca sé stesso o un familiare.";
         drawButton.textContent = drawDone ? "Ripeti l'estrazione" : "Fai l'estrazione";
+        resetDrawButton.hidden = !drawDone;
         message.textContent = notice || data.users.length + " utenti registrati.";
       } catch (error) {
         fail(error);
@@ -270,6 +273,19 @@
         message.textContent = error.message;
       } finally {
         drawButton.disabled = false;
+      }
+    });
+
+    resetDrawButton.addEventListener("click", async () => {
+      if (!confirm("Resettare l'estrazione? Verranno cancellate tutte le assegnazioni e tutti i regali già scelti. Potrai rifare l'estrazione quando vuoi.")) return;
+      resetDrawButton.disabled = true;
+      try {
+        const result = await ssApi("admin_reset_draw");
+        await loadUsers(result.message);
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        resetDrawButton.disabled = false;
       }
     });
 
