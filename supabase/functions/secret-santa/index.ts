@@ -352,8 +352,8 @@ Deno.serve(async (req: Request) => {
           login_name: normalizedAdultName,
         },
         participants: newParticipants.map(item => ({
+          id: item.id,
           display_name: item.display_name,
-          participant_type: item.participant_type,
         })),
       }, 201);
     }
@@ -551,6 +551,209 @@ Deno.serve(async (req: Request) => {
       }, 403);
     }
 
+
+    // WISHLIST DELLA PROPRIA FAMIGLIA
+    if (action === "my_wishlists") {
+      const { data: participants, error: participantsError } =
+        await adminClient
+          .from("ss_participants")
+          .select("id, display_name")
+          .eq("account_id", account.id)
+          .eq("edition_id", account.edition_id)
+          .order("display_name");
+
+      if (participantsError) {
+        console.error("My participants lookup:", participantsError.message);
+        return response({ error: "Errore nel recupero partecipanti" }, 500);
+      }
+
+      const participantIds = (participants ?? []).map(item => item.id);
+      const { data: wishlists, error: wishlistsError } = participantIds.length
+        ? await adminClient
+            .from("ss_wishlists")
+            .select("participant_id, ciphertext, nonce")
+            .in("participant_id", participantIds)
+        : { data: [], error: null };
+
+      if (wishlistsError) {
+        console.error("My wishlists lookup:", wishlistsError.message);
+        return response({ error: "Errore nel recupero delle wishlist" }, 500);
+      }
+
+      const wishlistByParticipant = new Map(
+        (wishlists ?? []).map(item => [item.participant_id, item]),
+      );
+
+      const result = await Promise.all((participants ?? []).map(async participant => {
+        const saved = wishlistByParticipant.get(participant.id);
+        let gifts: unknown[] = [];
+
+        if (saved) {
+          gifts = await decryptWishlist(saved.ciphertext, saved.nonce);
+        }
+
+        return {
+          participant_id: participant.id,
+          display_name: participant.display_name,
+          gifts,
+        };
+      }));
+
+      return response({ success: true, wishlists: result });
+    }
+
+    // SALVATAGGIO DELLA WISHLIST DI UN PARTECIPANTE DELLA PROPRIA FAMIGLIA
+    if (action === "save_wishlist") {
+      const participantId = body.participant_id;
+      const gifts = body.gifts;
+
+      if (
+        !validText(participantId) ||
+        !Array.isArray(gifts) ||
+        gifts.length > 30
+      ) {
+        return response({
+          error: "La wishlist non è valida. Puoi inserire al massimo 30 idee regalo.",
+        }, 400);
+      }
+
+      for (const gift of gifts) {
+        if (
+          !gift ||
+          typeof gift !== "object" ||
+          !validText(gift.name) ||
+          gift.name.trim().length > 200
+        ) {
+          return response({ error: "Ogni regalo deve avere un nome valido." }, 400);
+        }
+
+        if (gift.url !== undefined && gift.url !== null && gift.url !== "") {
+          if (
+            typeof gift.url !== "string" ||
+            gift.url.length > 2048
+          ) {
+            return response({ error: "Un link della wishlist non è valido." }, 400);
+          }
+
+          try {
+            const parsedUrl = new URL(gift.url);
+            if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+              return response({ error: "I link devono iniziare con http:// o https://." }, 400);
+            }
+          } catch {
+            return response({ error: "Un link della wishlist non è valido." }, 400);
+          }
+        }
+      }
+
+      const { data: edition, error: editionError } =
+        await adminClient
+          .from("ss_editions")
+          .select("wishlist_deadline")
+          .eq("id", account.edition_id)
+          .maybeSingle();
+
+      if (editionError || !edition) {
+        return response({ error: "Edizione non disponibile." }, 500);
+      }
+
+      if (
+        edition.wishlist_deadline &&
+        Date.now() > new Date(edition.wishlist_deadline).getTime()
+      ) {
+        return response({ error: "Il termine per modificare le wishlist è scaduto." }, 403);
+      }
+
+      const { data: participant, error: participantError } =
+        await adminClient
+          .from("ss_participants")
+          .select("id")
+          .eq("id", participantId)
+          .eq("account_id", account.id)
+          .eq("edition_id", account.edition_id)
+          .maybeSingle();
+
+      if (participantError || !participant) {
+        return response({
+          error: "Non puoi modificare la wishlist di questo partecipante.",
+        }, 403);
+      }
+
+      const encrypted = await encryptWishlist(
+        gifts.map(gift => ({
+          name: gift.name.trim(),
+          ...(gift.url ? { url: gift.url.trim() } : {}),
+        })),
+      );
+
+      const { error: saveError } = await adminClient
+        .from("ss_wishlists")
+        .upsert({
+          participant_id: participantId,
+          ciphertext: encrypted.ciphertext,
+          nonce: encrypted.nonce,
+          key_version: encrypted.key_version,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "participant_id" });
+
+      if (saveError) {
+        console.error("Wishlist save:", saveError.message);
+        return response({ error: "Non è stato possibile salvare la wishlist." }, 500);
+      }
+
+      return response({ success: true, message: "Wishlist salvata." });
+    }
+
+    // WISHLIST DEGLI ALTRI PARTECIPANTI: ESCLUDE SEMPRE LA PROPRIA FAMIGLIA
+    if (action === "public_wishlists") {
+      const { data: participants, error: participantsError } =
+        await adminClient
+          .from("ss_participants")
+          .select("id, display_name")
+          .eq("edition_id", account.edition_id)
+          .neq("account_id", account.id)
+          .order("display_name");
+
+      if (participantsError) {
+        console.error("Public participants lookup:", participantsError.message);
+        return response({ error: "Errore nel recupero partecipanti" }, 500);
+      }
+
+      const participantIds = (participants ?? []).map(item => item.id);
+      const { data: wishlists, error: wishlistsError } = participantIds.length
+        ? await adminClient
+            .from("ss_wishlists")
+            .select("participant_id, ciphertext, nonce")
+            .in("participant_id", participantIds)
+        : { data: [], error: null };
+
+      if (wishlistsError) {
+        console.error("Public wishlists lookup:", wishlistsError.message);
+        return response({ error: "Errore nel recupero delle wishlist" }, 500);
+      }
+
+      const wishlistByParticipant = new Map(
+        (wishlists ?? []).map(item => [item.participant_id, item]),
+      );
+
+      const result = await Promise.all((participants ?? []).map(async participant => {
+        const saved = wishlistByParticipant.get(participant.id);
+        let gifts: unknown[] = [];
+
+        if (saved) {
+          gifts = await decryptWishlist(saved.ciphertext, saved.nonce);
+        }
+
+        return {
+          participant_id: participant.id,
+          display_name: participant.display_name,
+          gifts,
+        };
+      }));
+
+      return response({ success: true, wishlists: result });
+    }
+
     // DATI ACCOUNT
     if (action === "whoami") {
       const { data: edition, error: editionError } =
@@ -570,9 +773,7 @@ Deno.serve(async (req: Request) => {
       const { data: participants, error: participantsError } =
         await adminClient
           .from("ss_participants")
-          .select(
-            "id, display_name, participant_type, must_reset_password",
-          )
+          .select("id, display_name, must_reset_password")
           .eq("account_id", account.id)
           .eq("edition_id", account.edition_id)
           .order("display_name");
