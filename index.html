@@ -1,66 +1,126 @@
-
+```html
 <!DOCTYPE html>
 <html lang="it">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#15392e">
-  <title>Secret Santa 🎅</title>
+  <title>Secret Santa 2026 🎅</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="hero">
     <div class="brand">🎄 SECRET SANTA 🎄</div>
     <p>La magia del Natale comincia qui</p>
-    <span class="status">PRE-ISCRIZIONI APERTE</span>
+    <span class="status">SECRET SANTA 2026</span>
   </header>
 
   <main class="container">
     <section class="panel">
-      <h1>Partecipa al Secret Santa</h1>
+      <h1>Benvenuti al Secret Santa!</h1>
       <p class="intro">
-        Registrati, prepara la tua lista dei desideri
-        e aspetta la chiusura delle iscrizioni!
+        Un regalo, una sorpresa, un Natale speciale.
       </p>
 
-      <form id="registrationForm">
-        <label for="name">Nome</label>
-        <input id="name" type="text"
-          placeholder="Es. Mario Rossi" required>
-
-        <label for="password">Password personale</label>
-        <input id="password" type="password"
-          placeholder="Scegli una password" minlength="10" required>
-
-        <div class="family-section">
-          <h2>👨‍👩‍👧‍👦 Gestione famiglia</h2>
-          <label class="check-label">
-            <input type="checkbox" id="hasChildren">
-            Sono genitore di figli minorenni
-          </label>
-
-          <div id="childrenArea" hidden>
-            <p>Inserisci il nome di ogni figlio.</p>
-            <div id="childrenList"></div>
-            <button type="button" id="addChild" class="secondary">
-              + Aggiungi un altro figlio
-            </button>
-          </div>
-        </div>
-
-        <div id="wishlists"></div>
-
-        <button type="submit" class="primary">
-          Conferma pre-iscrizione
+      <div class="auth-tabs">
+        <button type="button" id="showLogin" class="primary">
+          Accedi
         </button>
-      </form>
+        <button type="button" id="showRegister" class="secondary">
+          Registrati
+        </button>
+      </div>
+
+      <section id="loginSection">
+        <h2>Accedi al tuo account</h2>
+
+        <form id="loginForm">
+          <label for="loginName">Nome utente</label>
+          <input
+            id="loginName"
+            type="text"
+            placeholder="Es. Alex"
+            autocomplete="username"
+            required
+          >
+
+          <label for="loginPassword">Password</label>
+          <input
+            id="loginPassword"
+            type="password"
+            placeholder="La tua password"
+            autocomplete="current-password"
+            required
+          >
+
+          <button type="submit" class="primary">
+            Entra
+          </button>
+        </form>
+      </section>
+
+      <section id="registerSection" hidden>
+        <h2>Crea il tuo account familiare</h2>
+
+        <form id="registrationForm">
+          <label for="name">Nome e cognome dell'adulto</label>
+          <input
+            id="name"
+            type="text"
+            placeholder="Es. Mario Rossi"
+            autocomplete="name"
+            required
+          >
+
+          <label for="password">Scegli una password</label>
+          <input
+            id="password"
+            type="password"
+            placeholder="Almeno 12 caratteri"
+            minlength="12"
+            autocomplete="new-password"
+            required
+          >
+
+          <div class="family-section">
+            <h3>👨‍👩‍👧‍👦 La tua famiglia</h3>
+
+            <label class="check-label">
+              <input type="checkbox" id="hasChildren">
+              Sono genitore di figli minorenni
+            </label>
+
+            <div id="childrenArea" hidden>
+              <p>Inserisci nome e cognome di ogni figlio.</p>
+
+              <div id="childrenList"></div>
+
+              <button
+                type="button"
+                id="addChild"
+                class="secondary"
+              >
+                + Aggiungi un altro figlio
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" class="primary">
+            Crea account
+          </button>
+        </form>
+      </section>
 
       <div class="notice">
-        🔒 Il Secret Santa verrà rivelato soltanto
-        dopo la chiusura delle iscrizioni.
+        🔒 Le assegnazioni saranno disponibili dopo
+        la chiusura delle iscrizioni.
       </div>
 
       <p id="message" aria-live="polite"></p>
+
+      <p class="info-link">
+        <a href="come-funziona.html">🎁 Come funziona?</a>
+      </p>
     </section>
   </main>
 
@@ -71,3 +131,4 @@
   <script src="app.js"></script>
 </body>
 </html>
+```
