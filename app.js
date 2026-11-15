@@ -116,6 +116,7 @@ document.getElementById("addChild").addEventListener("click", () => {
 
 // Mostra il risultato del login e i partecipanti dell'account
 function showAccount(data) {
+  showRegister.hidden = true;
   loginForm.hidden = true;
 
   message.textContent =
@@ -144,60 +145,59 @@ function showAccount(data) {
 }
 
 // Cambio obbligatorio della password temporanea
-function showPasswordChange(token) {
+
+function showPasswordChange(token, loginName) {
   loginForm.hidden = true;
 
   const resetForm = document.createElement("form");
-  resetForm.id = "passwordResetForm";
+  resetForm.id = "passwordChangeForm";
 
-  const title = document.createElement("h2");
-  title.textContent = "Crea una nuova password";
-  resetForm.appendChild(title);
-
-  const description = document.createElement("p");
-  description.textContent =
-    "Per continuare devi sostituire la password temporanea.";
-  resetForm.appendChild(description);
-
-  const label = document.createElement("label");
-  label.textContent = "Nuova password";
-  label.htmlFor = "newPassword";
-  resetForm.appendChild(label);
-
-  const input = document.createElement("input");
-  input.id = "newPassword";
-  input.type = "password";
-  input.minLength = 12;
-  input.maxLength = 128;
-  input.autocomplete = "new-password";
-  input.required = true;
-  resetForm.appendChild(input);
-
-  const button = document.createElement("button");
-  button.type = "submit";
-  button.className = "primary";
-  button.textContent = "Cambia password";
-  resetForm.appendChild(button);
+  resetForm.innerHTML = `
+    <h2>Crea la tua nuova password</h2>
+    <p>Scegli una password personale di almeno 12 caratteri.</p>
+    <label for="newPassword">Nuova password</label>
+    <input
+      id="newPassword"
+      type="password"
+      minlength="12"
+      maxlength="128"
+      autocomplete="new-password"
+      required
+    >
+    <button type="submit" class="primary">Salva password</button>
+  `;
 
   loginSection.appendChild(resetForm);
 
-  resetForm.addEventListener("submit", async event => {
+  resetForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
+    const button = resetForm.querySelector("button");
+    const newPassword = document.getElementById("newPassword").value;
+
+    button.disabled = true;
+    message.textContent = "Aggiornamento password in corso...";
+
     try {
-      button.disabled = true;
-      message.textContent = "Aggiornamento password in corso...";
+      await apiCall("change_password", {
+        new_password: newPassword
+      }, token);
 
-      await apiCall(
-        "change_password",
-        { new_password: input.value },
-        token
-      );
+      // Effettua un nuovo login con la password appena impostata
+      const loginResult = await apiCall("login", {
+        login_name: loginName,
+        password: newPassword
+      });
 
-      const accountData = await apiCall("whoami", {}, token);
+      const newToken = loginResult.session.access_token;
+      sessionStorage.setItem("ss_access_token", newToken);
+
+      // Recupera i dati dell'account con la nuova sessione
+      const accountData = await apiCall("whoami", {}, newToken);
 
       resetForm.remove();
       showAccount(accountData);
+
     } catch (error) {
       message.textContent = error.message;
       button.disabled = false;
@@ -228,7 +228,7 @@ loginForm.addEventListener("submit", async event => {
 
     if (result.must_reset_password) {
       message.textContent = "";
-      showPasswordChange(token);
+      showPasswordChange(token, result.account.login_name);
       return;
     }
 
