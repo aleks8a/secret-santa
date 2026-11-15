@@ -38,6 +38,85 @@ function response(data: unknown, status = 200) {
 function validText(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
+// CIFRATURA DELLE WISHLIST
+async function getWishlistEncryptionKey() {
+  const secret = Deno.env.get("WISHLIST_ENCRYPTION_KEY");
+
+  if (!secret || secret.length < 40) {
+    throw new Error("Chiave di cifratura non configurata");
+  }
+
+  const keyMaterial = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(secret),
+  );
+
+  return await crypto.subtle.importKey(
+    "raw",
+    keyMaterial,
+    { name: "AES-GCM" },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string) {
+  return Uint8Array.from(
+    atob(value),
+    character => character.charCodeAt(0),
+  );
+}
+
+async function encryptWishlist(gifts: unknown[]) {
+  const key = await getWishlistEncryptionKey();
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+
+  const plaintext = new TextEncoder().encode(
+    JSON.stringify(gifts),
+  );
+
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce },
+    key,
+    plaintext,
+  );
+
+  return {
+    ciphertext: bytesToBase64(new Uint8Array(encrypted)),
+    nonce: bytesToBase64(nonce),
+    key_version: 1,
+  };
+}
+
+async function decryptWishlist(
+  ciphertext: string,
+  nonce: string,
+) {
+  const key = await getWishlistEncryptionKey();
+
+  const decrypted = await crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: base64ToBytes(nonce),
+    },
+    key,
+    base64ToBytes(ciphertext),
+  );
+
+  return JSON.parse(
+    new TextDecoder().decode(decrypted),
+  );
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
