@@ -59,7 +59,6 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    
     // REGISTRAZIONE DI UNA NUOVA FAMIGLIA
     if (action === "register") {
       const adultName = body.name;
@@ -81,7 +80,6 @@ Deno.serve(async (req: Request) => {
       }
 
       const normalizedAdultName = adultName.trim();
-
       const childNames: string[] = [];
 
       for (const child of children) {
@@ -190,23 +188,18 @@ Deno.serve(async (req: Request) => {
           email_confirm: true,
         });
 
-        
-        if (authResult.error || !authResult.data?.user) {
-          console.error(
-            "Auth registration:",
-            authResult.error?.message,
-          );
-        
-          return response({
-            error: "Non è stato possibile creare l'account.",
-          }, 500);
-        }
-        
-        const authUserId = authResult.data.user.id;
+      if (authResult.error || !authResult.data?.user) {
+        console.error(
+          "Auth registration:",
+          authResult.error?.message,
+        );
 
+        return response({
+          error: "Non è stato possibile creare l'account.",
+        }, 500);
       }
 
-      const authUserId = authResult.user.id;
+      const authUserId = authResult.data.user.id;
       const accountId = crypto.randomUUID();
       const now = new Date().toISOString();
 
@@ -285,7 +278,7 @@ Deno.serve(async (req: Request) => {
         })),
       }, 201);
     }
-    
+
     // LOGIN: nome utente + password
     if (action === "login") {
       const loginName = body.login_name;
@@ -478,7 +471,7 @@ Deno.serve(async (req: Request) => {
         must_reset_password: true,
       }, 403);
     }
-    
+
     // DATI ACCOUNT
     if (action === "whoami") {
       const { data: edition, error: editionError } =
