@@ -248,16 +248,18 @@ loginForm.addEventListener("submit", async event => {
 
 
 // Registrazione reale tramite Supabase Edge Function
+
 form.addEventListener("submit", async event => {
-  message.textContent = "Il modulo funziona: sto preparando la registrazione...";
   event.preventDefault();
+
+  message.textContent = "Il modulo funziona: sto preparando la registrazione...";
 
   const parentName = document.getElementById("name").value.trim();
   const password = document.getElementById("password").value;
 
-  if (!parentName || password.length < 12) {
+  if (!parentName || password.length < 6) {
     message.textContent =
-      "Inserisci il nome e una password di almeno 12 caratteri.";
+      "Inserisci il nome e una password di almeno 6 caratteri.";
     return;
   }
 
@@ -283,7 +285,6 @@ form.addEventListener("submit", async event => {
       children: childNames
     });
 
-    // Torna alla schermata di accesso
     registerSection.hidden = true;
     loginSection.hidden = false;
     showRegister.hidden = false;
