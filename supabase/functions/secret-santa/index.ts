@@ -1558,6 +1558,45 @@ Deno.serve(async (req: Request) => {
         });
       }
 
+      // RESET DELL'ESTRAZIONE: toglie le assegnazioni e tutti i regali scelti
+      if (action === "admin_reset_draw") {
+        const { data: everyone, error: everyoneError } = await adminClient
+          .from("ss_participants")
+          .select("id")
+          .eq("edition_id", account.edition_id);
+
+        if (everyoneError) {
+          return response({ error: "Errore nel recupero partecipanti." }, 500);
+        }
+
+        const allIds = (everyone ?? []).map(item => item.id);
+
+        const { error: clearSelectionsError } = await adminClient
+          .from("ss_gift_selections")
+          .delete()
+          .eq("edition_id", account.edition_id);
+
+        const { error: clearAssignmentsError } = allIds.length
+          ? await adminClient
+              .from("ss_assignments")
+              .delete()
+              .in("participant_id", allIds)
+          : { error: null };
+
+        if (clearSelectionsError || clearAssignmentsError) {
+          console.error(
+            "Admin reset draw:",
+            clearSelectionsError?.message ?? clearAssignmentsError?.message,
+          );
+          return response({ error: "Non è stato possibile resettare l'estrazione." }, 500);
+        }
+
+        return response({
+          success: true,
+          message: "Estrazione resettata: assegnazioni e regali scelti sono stati cancellati.",
+        });
+      }
+
       // ESTRAZIONE DEL SECRET SANTA
       if (action === "admin_draw") {
         const { data: everyone, error: everyoneError } = await adminClient
