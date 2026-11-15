@@ -249,6 +249,7 @@ loginForm.addEventListener("submit", async event => {
 
 // Registrazione reale tramite Supabase Edge Function
 form.addEventListener("submit", async event => {
+  message.textContent = "Il modulo funziona: sto preparando la registrazione...";
   event.preventDefault();
 
   const parentName = document.getElementById("name").value.trim();
