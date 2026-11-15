@@ -70,13 +70,13 @@ Deno.serve(async (req: Request) => {
         !validText(adultName) ||
         adultName.trim().length > 100 ||
         !validText(password) ||
-        password.length < 12 ||
+        password.length < 6 ||
         password.length > 128 ||
         !Array.isArray(children) ||
         children.length > 10
       ) {
         return response({
-          error: "Controlla nome, password e numero dei figli. La password deve avere almeno 12 caratteri.",
+          error: "Controlla nome, password e numero dei figli. La password deve avere almeno 6 caratteri.",
         }, 400);
       }
 
@@ -413,11 +413,11 @@ Deno.serve(async (req: Request) => {
 
       if (
         !validText(newPassword) ||
-        newPassword.length < 12 ||
+        newPassword.length < 6 ||
         newPassword.length > 128
       ) {
         return response({
-          error: "La nuova password deve avere almeno 12 caratteri",
+          error: "La nuova password deve avere almeno 6 caratteri",
         }, 400);
       }
 
