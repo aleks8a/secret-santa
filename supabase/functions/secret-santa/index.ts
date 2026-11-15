@@ -59,6 +59,228 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    
+    // REGISTRAZIONE DI UNA NUOVA FAMIGLIA
+    if (action === "register") {
+      const adultName = body.name;
+      const password = body.password;
+      const children = body.children ?? [];
+
+      if (
+        !validText(adultName) ||
+        adultName.trim().length > 100 ||
+        !validText(password) ||
+        password.length < 12 ||
+        password.length > 128 ||
+        !Array.isArray(children) ||
+        children.length > 10
+      ) {
+        return response({
+          error: "Controlla nome, password e numero dei figli. La password deve avere almeno 12 caratteri.",
+        }, 400);
+      }
+
+      const normalizedAdultName = adultName.trim();
+
+      const childNames: string[] = [];
+
+      for (const child of children) {
+        if (
+          !validText(child) ||
+          child.trim().length > 100
+        ) {
+          return response({
+            error: "Uno dei nomi dei figli non è valido.",
+          }, 400);
+        }
+
+        childNames.push(child.trim());
+      }
+
+      const allNames = [
+        normalizedAdultName,
+        ...childNames,
+      ];
+
+      const normalizedNames = allNames.map(
+        name => name.toLocaleLowerCase("it"),
+      );
+
+      if (new Set(normalizedNames).size !== normalizedNames.length) {
+        return response({
+          error: "Non puoi inserire due partecipanti con lo stesso nome.",
+        }, 400);
+      }
+
+      // Recupera l'edizione attiva
+      const { data: edition, error: editionError } =
+        await adminClient
+          .from("ss_editions")
+          .select("id, status, registration_deadline")
+          .eq("year", 2026)
+          .maybeSingle();
+
+      if (editionError || !edition) {
+        return response({
+          error: "Edizione non disponibile.",
+        }, 500);
+      }
+
+      if (edition.status !== "registration") {
+        return response({
+          error: "Le iscrizioni non sono attualmente aperte.",
+        }, 403);
+      }
+
+      if (
+        edition.registration_deadline &&
+        Date.now() > new Date(edition.registration_deadline).getTime()
+      ) {
+        return response({
+          error: "Il termine per le iscrizioni è scaduto.",
+        }, 403);
+      }
+
+      // Controlla i nomi già utilizzati nell'edizione
+      const { data: existingAccounts, error: accountsError } =
+        await adminClient
+          .from("ss_accounts")
+          .select("login_name")
+          .eq("edition_id", edition.id);
+
+      const { data: existingParticipants, error: participantsError } =
+        await adminClient
+          .from("ss_participants")
+          .select("display_name")
+          .eq("edition_id", edition.id);
+
+      if (accountsError || participantsError) {
+        return response({
+          error: "Impossibile verificare i nomi già registrati.",
+        }, 500);
+      }
+
+      const existingNames = new Set([
+        ...(existingAccounts ?? []).map(
+          item => item.login_name.toLocaleLowerCase("it"),
+        ),
+        ...(existingParticipants ?? []).map(
+          item => item.display_name.toLocaleLowerCase("it"),
+        ),
+      ]);
+
+      const duplicateName = allNames.find(
+        name => existingNames.has(name.toLocaleLowerCase("it")),
+      );
+
+      if (duplicateName) {
+        return response({
+          error: `Il nome "${duplicateName}" è già utilizzato. Scegli un nome diverso.`,
+        }, 409);
+      }
+
+      // Crea un'email tecnica casuale, mai mostrata agli utenti
+      const authEmail =
+        `ss-${crypto.randomUUID()}@example.com`;
+
+      const authResult =
+        await adminClient.auth.admin.createUser({
+          email: authEmail,
+          password,
+          email_confirm: true,
+        });
+
+      if (authResult.error || !authResult.user) {
+        console.error(
+          "Auth registration:",
+          authResult.error?.message,
+        );
+
+        return response({
+          error: "Non è stato possibile creare l'account.",
+        }, 500);
+      }
+
+      const authUserId = authResult.user.id;
+      const accountId = crypto.randomUUID();
+      const now = new Date().toISOString();
+
+      // Crea l'account familiare
+      const { error: newAccountError } =
+        await adminClient
+          .from("ss_accounts")
+          .insert({
+            id: accountId,
+            edition_id: edition.id,
+            login_name: normalizedAdultName,
+            auth_user_id: authUserId,
+            role: "user",
+            must_reset_password: false,
+            created_at: now,
+          });
+
+      if (newAccountError) {
+        console.error(
+          "Account registration:",
+          newAccountError.message,
+        );
+
+        await adminClient.auth.admin.deleteUser(authUserId);
+
+        return response({
+          error: "Non è stato possibile creare l'account. Verifica che il nome non sia già utilizzato.",
+        }, 409);
+      }
+
+      // Crea il genitore e gli eventuali figli come partecipanti
+      const newParticipants = allNames.map(
+        (displayName, index) => ({
+          id: crypto.randomUUID(),
+          edition_id: edition.id,
+          account_id: accountId,
+          display_name: displayName,
+          participant_type: index === 0 ? "adult" : "child",
+          must_reset_password: false,
+          created_at: now,
+        }),
+      );
+
+      const { error: newParticipantsError } =
+        await adminClient
+          .from("ss_participants")
+          .insert(newParticipants);
+
+      if (newParticipantsError) {
+        console.error(
+          "Participant registration:",
+          newParticipantsError.message,
+        );
+
+        await adminClient
+          .from("ss_accounts")
+          .delete()
+          .eq("id", accountId);
+
+        await adminClient.auth.admin.deleteUser(authUserId);
+
+        return response({
+          error: "Non è stato possibile registrare tutti i partecipanti. Controlla che i nomi non siano già utilizzati.",
+        }, 409);
+      }
+
+      return response({
+        success: true,
+        message: "Registrazione completata. Ora puoi accedere.",
+        account: {
+          login_name: normalizedAdultName,
+        },
+        participants: newParticipants.map(item => ({
+          display_name: item.display_name,
+          participant_type: item.participant_type,
+        })),
+      }, 201);
+    }
+    
     // LOGIN: nome utente + password
     if (action === "login") {
       const loginName = body.login_name;
