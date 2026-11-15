@@ -16,6 +16,7 @@ const registerSection = document.getElementById("registerSection");
 const showLogin = document.getElementById("showLogin");
 const showRegister = document.getElementById("showRegister");
 
+showRegister.hidden = true;
 let children = [];
 
 async function apiCall(action, data = {}, token = null) {
@@ -117,6 +118,8 @@ document.getElementById("addChild").addEventListener("click", () => {
 // Mostra il risultato del login e i partecipanti dell'account
 function showAccount(data) {
   showRegister.hidden = true;
+  loginSection.hidden = true;
+  registerSection.hidden = true;
   loginForm.hidden = true;
 
   message.textContent =
