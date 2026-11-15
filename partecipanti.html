@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15392e">
+  <title>Tutti i partecipanti – Secret Santa 2026</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .participant-card {
+      background: #fafaf7;
+      border: 1px solid #e3e9df;
+      padding: 16px;
+      border-radius: 12px;
+      margin-top: 15px;
+    }
+    .participant-card h2 {
+      color: var(--green);
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+    .participant-gift {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 9px 0;
+      border-top: 1px solid #e8ece6;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .participant-gift .gift-name {
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .participant-gift a {
+      flex: 0 0 auto;
+      white-space: nowrap;
+      color: var(--green-light);
+      font-size: 13px;
+    }
+    .empty-list {
+      color: #718077;
+      font-size: 14px;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">🎄 SECRET SANTA 🎄</div>
+    <p>La magia del Natale comincia qui</p>
+    <span class="status">TUTTI I PARTECIPANTI</span>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <h1>Le wishlist degli altri partecipanti 🎁</h1>
+      <p class="intro">
+        Qui puoi curiosare tra le idee regalo degli altri partecipanti.
+        Le persone della tua famiglia non vengono mostrate.
+      </p>
+
+      <div class="notice">
+        🔒 Per rispettare la privacy, non vedrai le wishlist tue o degli altri componenti della tua famiglia.
+      </div>
+
+      <p id="message" aria-live="polite">Caricamento delle wishlist...</p>
+      <div id="participantsList"></div>
+
+      <p class="info-link">
+        <a href="wishlist.html">← Torna alla mia wishlist</a>
+      </p>
+      <p class="info-link">
+        <a href="index.html">Torna alla pagina iniziale</a>
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    ✨ Un regalo, una sorpresa, un Natale speciale ✨
+  </footer>
+
+  <script>
+    const SUPABASE_URL = "https://peyedqobyytqwnxaovcr.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_u821cPWqBYZMRlqH0gaSbg_NSooa7_5";
+    const FUNCTION_URL = SUPABASE_URL + "/functions/v1/secret-santa";
+
+    const message = document.getElementById("message");
+    const participantsList = document.getElementById("participantsList");
+
+    async function apiCall(action, token) {
+      const response = await fetch(FUNCTION_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": "Bearer " + token
+        },
+        body: JSON.stringify({ action })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Si è verificato un errore.");
+      }
+      return result;
+    }
+
+    function renderParticipants(wishlists) {
+      participantsList.replaceChildren();
+
+      if (!wishlists.length) {
+        message.textContent = "Al momento non ci sono altri partecipanti registrati.";
+        return;
+      }
+
+      message.textContent = "Ecco le wishlist degli altri partecipanti.";
+      wishlists.forEach(participant => {
+        const card = document.createElement("section");
+        card.className = "participant-card";
+
+        const title = document.createElement("h2");
+        title.textContent = participant.display_name;
+        card.appendChild(title);
+
+        if (!participant.gifts || participant.gifts.length === 0) {
+          const empty = document.createElement("p");
+          empty.className = "empty-list";
+          empty.textContent = "Nessun regalo inserito per ora.";
+          card.appendChild(empty);
+        } else {
+          participant.gifts.forEach(gift => {
+            const row = document.createElement("div");
+            row.className = "participant-gift";
+
+            const name = document.createElement("span");
+            name.className = "gift-name";
+            name.textContent = "🎁 " + gift.name;
+            row.appendChild(name);
+
+            if (gift.url) {
+              const link = document.createElement("a");
+              link.href = gift.url;
+              link.target = "_blank";
+              link.rel = "noopener noreferrer";
+              link.textContent = "Apri link";
+              row.appendChild(link);
+            }
+
+            card.appendChild(row);
+          });
+        }
+
+        participantsList.appendChild(card);
+      });
+    }
+
+    async function loadWishlists() {
+      const token = sessionStorage.getItem("ss_access_token");
+      if (!token) {
+        message.textContent = "Per vedere le wishlist devi prima accedere.";
+        const loginLink = document.createElement("a");
+        loginLink.href = "index.html";
+        loginLink.textContent = " Vai alla pagina di accesso";
+        message.appendChild(loginLink);
+        return;
+      }
+
+      try {
+        const result = await apiCall("public_wishlists", token);
+        renderParticipants(result.wishlists || []);
+      } catch (error) {
+        message.textContent = error.message;
+        if (error.message.includes("Sessione non valida")) {
+          const loginLink = document.createElement("a");
+          loginLink.href = "index.html";
+          loginLink.textContent = " Accedi di nuovo";
+          message.appendChild(loginLink);
+        }
+      }
+    }
+
+    loadWishlists();
+  </script>
+</body>
+</html>
