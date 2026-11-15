@@ -39,7 +39,45 @@
       color: var(--green-light);
       font-size: 13px;
     }
-    .empty-list {
+    .santa-box {
+      background: #f6f2e6;
+      border: 1px solid #e8c985;
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 20px;
+    }
+    .santa-box h2 { margin: 0 0 8px; font-size: 18px; }
+    .santa-box ul { margin: 0; padding-left: 20px; line-height: 1.7; font-size: 14px; }
+    .participant-card.is-recipient {
+      border: 2px solid var(--gold);
+      background: #fffbee;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: bold;
+      padding: 3px 9px;
+      border-radius: 20px;
+      background: var(--gold);
+      color: var(--green);
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .gift-state { flex: 0 0 auto; font-size: 13px; }
+    .gift-state button { margin-top: 0; width: auto; padding: 7px 11px; font-size: 13px; }
+    .taken-label { color: #8a8a8a; font-style: italic; }
+    .mine-label { color: var(--green-light); font-weight: bold; }
+    .participant-gift.is-taken .gift-name { color: #9aa39d; text-decoration: line-through; }
+    .locked-note {
+      font-size: 13px; color: #675936; background: #f6f2e6;
+      padding: 10px; border-radius: 8px; margin: 0 0 8px;
+    }
+    .participant-gift { flex-wrap: wrap; }
+    .participant-gift .gift-state { margin-left: auto; }
+    .top-actions { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+    .top-actions a { font-size: 14px; }
+    .top-actions button { margin: 0; }
+
       color: #718077;
       font-size: 14px;
       font-style: italic;
@@ -55,24 +93,36 @@
 
   <main class="container">
     <section class="panel">
-      <h1>Le wishlist degli altri partecipanti 🎁</h1>
+      <div class="top-actions">
+        <a href="home.html">← La mia pagina</a>
+        <button type="button" id="logoutButton" class="remove">Esci</button>
+      </div>
+
+      <h1>Partecipanti e regali 🎁</h1>
       <p class="intro">
-        Qui puoi curiosare tra le idee regalo degli altri partecipanti.
+        Qui trovi le idee regalo degli altri partecipanti e puoi sceglierne una.
         Le persone della tua famiglia non vengono mostrate.
       </p>
 
+      <section id="santaBox" class="santa-box" hidden>
+        <h2>🎅 Il tuo Secret Santa</h2>
+        <ul id="santaList"></ul>
+      </section>
+
       <div class="notice">
         🔒 Per rispettare la privacy, non vedrai le wishlist tue o degli altri componenti della tua famiglia.
+        Un regalo scelto da qualcuno diventa "non disponibile" per tutti gli altri.
+        Le liste degli altri si sbloccano quando il loro Secret Santa ha deciso cosa regalare.
       </div>
 
       <p id="message" aria-live="polite">Caricamento delle wishlist...</p>
       <div id="participantsList"></div>
 
       <p class="info-link">
-        <a href="wishlist.html">← Torna alla mia wishlist</a>
+        <a href="wishlist.html">🎁 Vai alla mia wishlist</a>
       </p>
       <p class="info-link">
-        <a href="index.html">Torna alla pagina iniziale</a>
+        <a href="home.html">← Torna alla mia pagina</a>
       </p>
     </section>
   </main>
@@ -81,48 +131,109 @@
     ✨ Un regalo, una sorpresa, un Natale speciale ✨
   </footer>
 
+  <script src="common.js?v=1"></script>
   <script>
-    const SUPABASE_URL = "https://peyedqobyytqwnxaovcr.supabase.co";
-    const SUPABASE_ANON_KEY = "sb_publishable_u821cPWqBYZMRlqH0gaSbg_NSooa7_5";
-    const FUNCTION_URL = SUPABASE_URL + "/functions/v1/secret-santa";
-
     const message = document.getElementById("message");
     const participantsList = document.getElementById("participantsList");
+    const santaBox = document.getElementById("santaBox");
+    const santaList = document.getElementById("santaList");
 
-    async function apiCall(action, token) {
-      const response = await fetch(FUNCTION_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": SUPABASE_ANON_KEY,
-          "Authorization": "Bearer " + token
-        },
-        body: JSON.stringify({ action })
-      });
+    document.getElementById("logoutButton").addEventListener("click", ssLogout);
 
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || "Si è verificato un errore.");
+    function addLoginLink(text) {
+      const loginLink = document.createElement("a");
+      loginLink.href = "index.html";
+      loginLink.textContent = text;
+      message.appendChild(loginLink);
+    }
+
+    // In alto: a chi devo fare il regalo (per ciascun partecipante del mio account)
+    function renderSanta(assignments) {
+      santaList.replaceChildren();
+      santaBox.hidden = false;
+
+      if (!assignments.length || assignments.every(a => !a.receiver_name)) {
+        const item = document.createElement("li");
+        item.textContent = "L'estrazione non è ancora stata effettuata: appena sarà fatta, qui vedrai a chi devi fare il regalo.";
+        item.style.listStyle = "none";
+        item.style.marginLeft = "-20px";
+        santaList.appendChild(item);
+        return;
       }
-      return result;
+
+      assignments.forEach(a => {
+        if (!a.receiver_name) return;
+        const item = document.createElement("li");
+        const who = assignments.length > 1 ? a.giver_name + ": " : "Devi fare il regalo a ";
+        item.append(who);
+        const link = document.createElement("a");
+        link.href = "#p-" + a.receiver_participant_id;
+        const strong = document.createElement("strong");
+        strong.textContent = a.receiver_name;
+        link.appendChild(strong);
+        item.appendChild(link);
+        santaList.appendChild(item);
+      });
+    }
+
+    async function selectGift(participant, gift) {
+      const ok = confirm(
+        'Vuoi scegliere "' + gift.name + '" per ' + participant.display_name + '?\n\n' +
+        'Dopo la conferma il regalo diventerà "non disponibile" per tutti gli altri.'
+      );
+      if (!ok) return;
+
+      try {
+        message.textContent = "Salvataggio in corso...";
+        await ssApi("select_gift", {
+          participant_id: participant.participant_id,
+          gift_key: gift.gift_key
+        });
+        await loadWishlists("Regalo selezionato: ora è non disponibile per gli altri.");
+      } catch (error) {
+        await loadWishlists(error.message);
+      }
+    }
+
+    async function releaseGift(participant, gift) {
+      if (!confirm('Vuoi annullare la scelta di "' + gift.name + '"? Tornerà disponibile per gli altri.')) return;
+
+      try {
+        message.textContent = "Salvataggio in corso...";
+        await ssApi("release_gift", {
+          participant_id: participant.participant_id,
+          gift_key: gift.gift_key
+        });
+        await loadWishlists("Selezione annullata.");
+      } catch (error) {
+        await loadWishlists(error.message);
+      }
     }
 
     function renderParticipants(wishlists) {
       participantsList.replaceChildren();
 
-      if (!wishlists.length) {
-        message.textContent = "Al momento non ci sono altri partecipanti registrati.";
-        return;
-      }
-
-      message.textContent = "Ecco le wishlist degli altri partecipanti.";
       wishlists.forEach(participant => {
         const card = document.createElement("section");
-        card.className = "participant-card";
+        card.className = "participant-card" + (participant.is_my_recipient ? " is-recipient" : "");
+        card.id = "p-" + participant.participant_id;
 
         const title = document.createElement("h2");
         title.textContent = participant.display_name;
+        if (participant.is_my_recipient) {
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = "🎅 Il tuo Secret Santa";
+          title.appendChild(badge);
+        }
         card.appendChild(title);
+
+        if (!participant.can_select && participant.blocked_reason) {
+          const locked = document.createElement("p");
+          locked.className = "locked-note";
+          locked.textContent = "🔒 " + participant.blocked_reason;
+          card.appendChild(locked);
+        }
 
         if (!participant.gifts || participant.gifts.length === 0) {
           const empty = document.createElement("p");
@@ -132,7 +243,7 @@
         } else {
           participant.gifts.forEach(gift => {
             const row = document.createElement("div");
-            row.className = "participant-gift";
+            row.className = "participant-gift" + (gift.status === "taken" ? " is-taken" : "");
 
             const name = document.createElement("span");
             name.className = "gift-name";
@@ -148,6 +259,35 @@
               row.appendChild(link);
             }
 
+            const state = document.createElement("span");
+            state.className = "gift-state";
+
+            if (gift.status === "taken") {
+              state.className += " taken-label";
+              state.textContent = "Non disponibile";
+            } else if (gift.status === "mine") {
+              const label = document.createElement("span");
+              label.className = "mine-label";
+              label.textContent = "✓ Scelto da te ";
+              const undo = document.createElement("button");
+              undo.type = "button";
+              undo.className = "secondary";
+              undo.textContent = "Annulla";
+              undo.addEventListener("click", () => releaseGift(participant, gift));
+              state.append(label, undo);
+            } else if (participant.can_select) {
+              const pick = document.createElement("button");
+              pick.type = "button";
+              pick.className = "primary";
+              pick.textContent = "Scelgo questo";
+              pick.addEventListener("click", () => selectGift(participant, gift));
+              state.appendChild(pick);
+            } else {
+              state.className += " taken-label";
+              state.textContent = "Non ancora selezionabile";
+            }
+
+            row.appendChild(state);
             card.appendChild(row);
           });
         }
@@ -156,28 +296,24 @@
       });
     }
 
-    async function loadWishlists() {
-      const token = sessionStorage.getItem("ss_access_token");
-      if (!token) {
-        message.textContent = "Per vedere le wishlist devi prima accedere.";
-        const loginLink = document.createElement("a");
-        loginLink.href = "index.html";
-        loginLink.textContent = " Vai alla pagina di accesso";
-        message.appendChild(loginLink);
+    async function loadWishlists(notice) {
+      if (!ssToken()) {
+        message.textContent = "Per vedere i partecipanti devi prima accedere.";
+        addLoginLink(" Vai alla pagina di accesso");
         return;
       }
 
       try {
-        const result = await apiCall("public_wishlists", token);
+        const result = await ssApi("public_wishlists");
+        renderSanta(result.my_assignments || []);
         renderParticipants(result.wishlists || []);
+        message.textContent = notice ||
+          ((result.wishlists || []).length
+            ? "Ecco gli altri partecipanti."
+            : "Al momento non ci sono altri partecipanti registrati.");
       } catch (error) {
         message.textContent = error.message;
-        if (error.message.includes("Sessione non valida")) {
-          const loginLink = document.createElement("a");
-          loginLink.href = "index.html";
-          loginLink.textContent = " Accedi di nuovo";
-          message.appendChild(loginLink);
-        }
+        if (ssSessionExpired(error)) addLoginLink(" Accedi di nuovo");
       }
     }
 

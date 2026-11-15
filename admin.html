@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15392e">
+  <title>Amministratore – Secret Santa 2026</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .user-card {
+      background: #fafaf7;
+      border: 1px solid #e3e9df;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-top: 12px;
+    }
+    .user-card h3 { margin: 0 0 4px; font-size: 16px; color: var(--green); }
+    .user-card .members { font-size: 13px; color: #718077; line-height: 1.5; }
+    .user-card .tag {
+      display: inline-block; font-size: 11px; font-weight: bold;
+      padding: 2px 8px; border-radius: 20px; margin-left: 6px;
+      background: var(--gold); color: var(--green); vertical-align: middle;
+    }
+    .user-card .tag.pending { background: #f6e3e3; color: #8f2a2a; }
+    .user-actions { display: flex; gap: 8px; margin-top: 12px; }
+    .user-actions button { margin-top: 0; flex: 1; padding: 10px; }
+    .temp-box {
+      margin-top: 18px; padding: 16px; border-radius: 12px;
+      background: #eef6ec; border: 2px solid var(--green-light);
+      font-size: 14px; line-height: 1.6;
+    }
+    .temp-box code {
+      display: block; font-size: 24px; letter-spacing: 2px; margin: 8px 0;
+      padding: 10px; background: white; border-radius: 8px; text-align: center;
+      user-select: all;
+    }
+    .temp-box button { margin-top: 8px; }
+    details.add-user summary {
+      cursor: pointer; font-weight: bold; font-size: 15px; padding: 12px 0;
+    }
+    .top-actions { display: flex; justify-content: space-between; gap: 10px; }
+    .top-actions a { font-size: 14px; }
+    .top-actions button { margin: 0; }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">🎄 SECRET SANTA 🎄</div>
+    <p>La magia del Natale comincia qui</p>
+    <span class="status">AMMINISTRATORE</span>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <div class="top-actions">
+        <a href="home.html">← La mia pagina</a>
+        <button type="button" id="logoutButton" class="remove">Esci</button>
+      </div>
+
+      <h1>Impostazioni ⚙️</h1>
+      <p id="message" aria-live="polite">Caricamento...</p>
+
+      <div id="tempBox" class="temp-box" hidden></div>
+
+      <h2>Estrazione Secret Santa 🎅</h2>
+      <p class="intro" id="drawStatus"></p>
+      <button type="button" id="drawButton" class="primary">Fai l'estrazione</button>
+
+      <h2>Utenti</h2>
+      <p class="intro">
+        Con "Reset password" si crea una password temporanea: chiama la persona
+        e comunicagliela. Al primo accesso dovrà sceglierne una nuova.
+      </p>
+      <div id="usersList"></div>
+
+      <h2>Aggiungi un utente</h2>
+      <details class="add-user">
+        <summary>＋ Nuovo utente</summary>
+        <form id="addUserForm">
+          <label for="newName">Nome e cognome</label>
+          <input id="newName" type="text" maxlength="100" placeholder="Es. Mario Rossi" required>
+
+          <label for="newPassword">Password temporanea (facoltativa)</label>
+          <input id="newPassword" type="text" minlength="6" maxlength="128"
+            placeholder="Lascia vuoto per generarla automaticamente" autocomplete="off">
+
+          <div class="family-section">
+            <h3>👨‍👩‍👧‍👦 Figli minorenni</h3>
+            <div id="newChildren"></div>
+            <button type="button" id="addChildButton" class="secondary">+ Aggiungi un figlio</button>
+          </div>
+
+          <button type="submit" class="primary">Crea utente</button>
+        </form>
+      </details>
+    </section>
+  </main>
+
+  <footer>✨ Un regalo, una sorpresa, un Natale speciale ✨</footer>
+
+  <script src="common.js?v=1"></script>
+  <script>
+    const message = document.getElementById("message");
+    const usersList = document.getElementById("usersList");
+    const tempBox = document.getElementById("tempBox");
+    const drawButton = document.getElementById("drawButton");
+    const drawStatus = document.getElementById("drawStatus");
+    const addUserForm = document.getElementById("addUserForm");
+    const newChildren = document.getElementById("newChildren");
+
+    let currentAccountId = null;
+    let drawDone = false;
+
+    document.getElementById("logoutButton").addEventListener("click", ssLogout);
+
+    function fail(error) {
+      if (ssSessionExpired(error)) {
+        sessionStorage.removeItem(SS_TOKEN_KEY);
+        window.location.replace("index.html");
+        return;
+      }
+      if (error.status === 403) {
+        window.location.replace("home.html");
+        return;
+      }
+      message.textContent = error.message;
+    }
+
+    // Mostra la password temporanea una sola volta, da dire a voce
+    function showTempPassword(title, loginName, password) {
+      tempBox.replaceChildren();
+      const heading = document.createElement("strong");
+      heading.textContent = title;
+      const text = document.createElement("div");
+      text.textContent = "Chiama " + loginName + " e comunicagli questa password temporanea " +
+        "(nome utente: " + loginName + "). Al primo accesso dovrà sceglierne una nuova.";
+      const code = document.createElement("code");
+      code.textContent = password;
+      const warn = document.createElement("div");
+      warn.textContent = "⚠️ Non verrà mostrata di nuovo.";
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "secondary";
+      copy.textContent = "Copia password";
+      copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(password);
+          copy.textContent = "Copiata ✓";
+        } catch {
+          copy.textContent = "Selezionala e copiala a mano";
+        }
+      });
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "secondary";
+      close.textContent = "Fatto, nascondi";
+      close.addEventListener("click", () => { tempBox.hidden = true; tempBox.replaceChildren(); });
+      tempBox.append(heading, text, code, warn, copy, close);
+      tempBox.hidden = false;
+      tempBox.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    function renderUsers(users) {
+      usersList.replaceChildren();
+
+      users.forEach(user => {
+        const card = document.createElement("div");
+        card.className = "user-card";
+
+        const title = document.createElement("h3");
+        title.textContent = user.login_name;
+        if (user.role === "admin") {
+          const tag = document.createElement("span");
+          tag.className = "tag";
+          tag.textContent = "admin";
+          title.appendChild(tag);
+        }
+        if (user.must_reset_password) {
+          const tag = document.createElement("span");
+          tag.className = "tag pending";
+          tag.textContent = "deve cambiare password";
+          title.appendChild(tag);
+        }
+        card.appendChild(title);
+
+        const members = document.createElement("div");
+        members.className = "members";
+        const children = user.participants.filter(p => p.display_name !== user.login_name);
+        members.textContent = children.length
+          ? "Figli: " + children.map(p => p.display_name).join(", ")
+          : "Nessun figlio";
+        card.appendChild(members);
+
+        if (user.id !== currentAccountId) {
+          const actions = document.createElement("div");
+          actions.className = "user-actions";
+
+          const reset = document.createElement("button");
+          reset.type = "button";
+          reset.className = "secondary";
+          reset.textContent = "Reset password";
+          reset.addEventListener("click", () => resetPassword(user, reset));
+
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "danger";
+          del.textContent = "Elimina";
+          del.addEventListener("click", () => deleteUser(user, del));
+
+          actions.append(reset, del);
+          card.appendChild(actions);
+        }
+
+        usersList.appendChild(card);
+      });
+    }
+
+    async function loadUsers(notice) {
+      try {
+        const data = await ssApi("admin_list_users");
+        currentAccountId = data.current_account_id;
+        drawDone = data.draw_done;
+        renderUsers(data.users);
+        drawStatus.textContent = drawDone
+          ? "L'estrazione è stata fatta. Ripeterla cancella le assegnazioni e tutte le selezioni dei regali."
+          : "L'estrazione non è ancora stata fatta. Falla quando tutti sono iscritti: nessuno pesca sé stesso o un familiare.";
+        drawButton.textContent = drawDone ? "Ripeti l'estrazione" : "Fai l'estrazione";
+        message.textContent = notice || data.users.length + " utenti registrati.";
+      } catch (error) {
+        fail(error);
+      }
+    }
+
+    async function resetPassword(user, button) {
+      if (!confirm('Creare una password temporanea per "' + user.login_name + '"? La vecchia password smetterà di funzionare.')) return;
+      button.disabled = true;
+      try {
+        const result = await ssApi("admin_reset_password", { account_id: user.id });
+        showTempPassword("Password resettata", result.login_name, result.temp_password);
+        await loadUsers("Password di " + result.login_name + " resettata.");
+      } catch (error) {
+        message.textContent = error.message;
+        button.disabled = false;
+      }
+    }
+
+    async function deleteUser(user, button) {
+      if (!confirm('Eliminare definitivamente "' + user.login_name + '" e i suoi figli, con wishlist e selezioni? L\'operazione non si può annullare.')) return;
+      button.disabled = true;
+      try {
+        const result = await ssApi("admin_delete_user", { account_id: user.id });
+        let notice = result.message;
+        if (result.draw_affected) {
+          notice += " Attenzione: era coinvolto nell'estrazione, conviene ripeterla.";
+        }
+        await loadUsers(notice);
+      } catch (error) {
+        message.textContent = error.message;
+        button.disabled = false;
+      }
+    }
+
+    drawButton.addEventListener("click", async () => {
+      if (drawDone && !confirm("Ripetere l'estrazione cancella tutte le assegnazioni e tutti i regali già selezionati. Continuare?")) return;
+      drawButton.disabled = true;
+      try {
+        const result = await ssApi("admin_draw", { confirm_redo: drawDone });
+        await loadUsers(result.message);
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        drawButton.disabled = false;
+      }
+    });
+
+    // Figli nel modulo "Nuovo utente"
+    function addChildField() {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.maxLength = 100;
+      input.placeholder = "Nome e cognome del figlio/a";
+      input.required = true;
+      input.style.marginTop = "8px";
+      newChildren.appendChild(input);
+    }
+    document.getElementById("addChildButton").addEventListener("click", addChildField);
+
+    addUserForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      const button = addUserForm.querySelector('button[type="submit"]');
+      const name = document.getElementById("newName").value.trim();
+      const password = document.getElementById("newPassword").value;
+      const children = [...newChildren.querySelectorAll("input")].map(i => i.value.trim());
+
+      button.disabled = true;
+      message.textContent = "Creazione in corso...";
+      try {
+        const result = await ssApi("admin_create_user", { name, password, children });
+        addUserForm.reset();
+        newChildren.replaceChildren();
+        showTempPassword("Utente creato", result.login_name, result.temp_password);
+        await loadUsers("Utente " + result.login_name + " creato.");
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    async function init() {
+      if (!ssToken()) {
+        window.location.replace("index.html");
+        return;
+      }
+      await loadUsers();
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -215,3 +215,53 @@ footer {
     font-size: 24px;
   }
 }
+
+/* Navigazione e pulsante Esci */
+.nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.nav-link,
+a.button-link {
+  display: block;
+  text-align: center;
+  padding: 14px;
+  border-radius: 9px;
+  background: #e1ebe0;
+  color: var(--green);
+  font-weight: bold;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.nav-link.primary-link {
+  background: var(--green);
+  color: white;
+}
+
+.logout-button {
+  background: transparent;
+  border: 1px solid #c9a0a0;
+  color: #a33;
+  margin-top: 24px;
+}
+
+.small-button {
+  width: auto;
+  padding: 8px 12px;
+  margin-top: 0;
+  font-size: 13px;
+}
+
+.danger {
+  background: #f6e3e3;
+  color: #8f2a2a;
+}
+
+.back-row {
+  margin: 0 0 6px;
+  font-size: 14px;
+}

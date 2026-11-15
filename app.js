@@ -116,36 +116,9 @@ document.getElementById("addChild").addEventListener("click", () => {
   renderChildren();
 });
 
-// Mostra il risultato del login e i partecipanti dell'account
-function showAccount(data) {
-  showRegister.hidden = true;
-  loginSection.hidden = true;
-  registerSection.hidden = true;
-  loginForm.hidden = true;
-
-  message.textContent =
-    "Accesso effettuato! Benvenuto, " +
-    data.account.login_name + ".";
-
-  const details = document.createElement("p");
-  details.textContent =
-    "Partecipanti associati a questo account: " +
-    data.participants.map(p => p.display_name).join(", ");
-
-  message.appendChild(document.createElement("br"));
-  message.appendChild(details);
-
-  const wishlistLink = document.createElement("a");
-  wishlistLink.href = "wishlist.html";
-  wishlistLink.textContent = "La mia wishlist";
-
-  const santaLink = document.createElement("a");
-  santaLink.href = "secret-santa.html";
-  santaLink.textContent = "Il nostro Secret Santa";
-
-  message.appendChild(wishlistLink);
-  message.appendChild(document.createElement("br"));
-  message.appendChild(santaLink);
+// Dopo l'accesso si va alla pagina personale
+function showAccount() {
+  window.location.href = "home.html";
 }
 
 // Cambio obbligatorio della password temporanea
@@ -196,11 +169,11 @@ function showPasswordChange(token, loginName) {
       const newToken = loginResult.session.access_token;
       sessionStorage.setItem("ss_access_token", newToken);
 
-      // Recupera i dati dell'account con la nuova sessione
-      const accountData = await apiCall("whoami", {}, newToken);
+      // Verifica la nuova sessione
+      await apiCall("whoami", {}, newToken);
 
       resetForm.remove();
-      showAccount(accountData);
+      showAccount();
 
     } catch (error) {
       message.textContent = error.message;
@@ -236,8 +209,8 @@ loginForm.addEventListener("submit", async event => {
       return;
     }
 
-    const accountData = await apiCall("whoami", {}, token);
-    showAccount(accountData);
+    await apiCall("whoami", {}, token);
+    showAccount();
 
   } catch (error) {
     message.textContent = error.message;
@@ -307,3 +280,17 @@ form.addEventListener("submit", async event => {
     button.disabled = false;
   }
 });
+
+
+// Se la sessione è ancora valida, niente login: si apre la pagina personale
+(async function resumeSession() {
+  const token = sessionStorage.getItem("ss_access_token");
+  if (!token) return;
+
+  try {
+    await apiCall("whoami", {}, token);
+    window.location.replace("home.html");
+  } catch {
+    sessionStorage.removeItem("ss_access_token");
+  }
+})();

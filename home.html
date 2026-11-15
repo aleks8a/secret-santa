@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15392e">
+  <title>La mia pagina – Secret Santa 2026</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">🎄 SECRET SANTA 🎄</div>
+    <p>La magia del Natale comincia qui</p>
+    <span class="status">LA MIA PAGINA</span>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <h1 id="welcome">Benvenuto!</h1>
+      <p class="intro" id="participantsInfo">Caricamento...</p>
+
+      <div class="nav-links">
+        <a class="nav-link primary-link" href="partecipanti.html">🎅 Partecipanti e regali</a>
+        <a class="nav-link" href="wishlist.html">🎁 La mia wishlist</a>
+        <a class="nav-link" href="secret-santa.html">🤫 Il nostro Secret Santa</a>
+        <a class="nav-link" id="adminLink" href="admin.html" hidden>⚙️ Pannello amministratore</a>
+      </div>
+
+      <p id="message" aria-live="polite"></p>
+
+      <button type="button" id="logoutButton" class="logout-button">Esci</button>
+    </section>
+  </main>
+
+  <footer>✨ Un regalo, una sorpresa, un Natale speciale ✨</footer>
+
+  <script src="common.js?v=1"></script>
+  <script>
+    document.getElementById("logoutButton").addEventListener("click", ssLogout);
+
+    async function init() {
+      if (!ssToken()) {
+        window.location.replace("index.html");
+        return;
+      }
+
+      try {
+        const data = await ssApi("whoami");
+        document.getElementById("welcome").textContent =
+          "Ciao, " + data.account.login_name + "! 👋";
+        document.getElementById("participantsInfo").textContent =
+          "Partecipanti associati a questo account: " +
+          data.participants.map(p => p.display_name).join(", ");
+
+        if (data.account.role === "admin") {
+          document.getElementById("adminLink").hidden = false;
+        }
+      } catch (error) {
+        if (ssSessionExpired(error) || (error.data && error.data.must_reset_password)) {
+          sessionStorage.removeItem(SS_TOKEN_KEY);
+          window.location.replace("index.html");
+          return;
+        }
+        document.getElementById("participantsInfo").textContent = "";
+        document.getElementById("message").textContent = error.message;
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
