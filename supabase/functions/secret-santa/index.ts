@@ -1098,6 +1098,7 @@ Deno.serve(async (req: Request) => {
                 : selection.selected_by_account_id === account.id
                   ? "mine"
                   : "taken",
+              is_secret_santa_pick: selection?.is_secret_santa_pick === true,
             };
           },
         );

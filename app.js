@@ -131,12 +131,12 @@ function showPasswordChange(token, loginName) {
 
   resetForm.innerHTML = `
     <h2>Crea la tua nuova password</h2>
-    <p>Scegli una password personale di almeno 12 caratteri.</p>
+    <p>Scegli una password personale di almeno 6 caratteri.</p>
     <label for="newPassword">Nuova password</label>
     <input
       id="newPassword"
       type="password"
-      minlength="12"
+      minlength="6"
       maxlength="128"
       autocomplete="new-password"
       required

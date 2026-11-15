@@ -264,7 +264,9 @@
 
             if (gift.status === "taken") {
               state.className += " taken-label";
-              state.textContent = "Non disponibile";
+              state.textContent = gift.is_secret_santa_pick
+                ? "Già scelto dal Secret Santa"
+                : "Non disponibile";
             } else if (gift.status === "mine") {
               const label = document.createElement("span");
               label.className = "mine-label";

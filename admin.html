@@ -228,7 +228,16 @@
           : "L'estrazione non è ancora stata fatta. Falla quando tutti sono iscritti: nessuno pesca sé stesso o un familiare.";
         drawButton.textContent = drawDone ? "Ripeti l'estrazione" : "Fai l'estrazione";
         resetDrawButton.hidden = !drawDone;
-        message.textContent = notice || data.users.length + " utenti registrati.";
+        const totalParticipants = data.users.reduce(
+          (total, user) => total + (user.participants || []).length,
+          0,
+        );
+        const countSummary =
+          data.users.length + " utenti registrati / " +
+          totalParticipants + " utenti partecipanti all'estrazione.";
+        message.textContent = notice
+          ? countSummary + " " + notice
+          : countSummary;
       } catch (error) {
         fail(error);
       }
