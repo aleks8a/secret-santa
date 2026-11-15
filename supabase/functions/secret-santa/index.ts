@@ -194,6 +194,41 @@ async function loadGifts(participantIds: string[]) {
   return result;
 }
 
+// Estrazione: la tabella ss_assignments è cifrata (participant_id, ciphertext, nonce).
+// Ogni riga appartiene a chi FA il regalo e contiene l'id di chi lo RICEVE.
+// Restituisce una mappa chi-fa-il-regalo -> chi-lo-riceve per l'edizione.
+async function loadAssignmentMap(editionId: string) {
+  const map = new Map<string, string>();
+
+  const { data: people, error: peopleError } = await adminClient
+    .from("ss_participants")
+    .select("id")
+    .eq("edition_id", editionId);
+
+  if (peopleError) throw new Error("Errore nel recupero partecipanti");
+
+  const ids = (people ?? []).map(item => item.id);
+  if (ids.length === 0) return map;
+
+  const { data: rows, error: rowsError } = await adminClient
+    .from("ss_assignments")
+    .select("participant_id, ciphertext, nonce")
+    .in("participant_id", ids);
+
+  if (rowsError) {
+    console.error("ss_assignments lookup:", rowsError.message);
+    throw new Error("Errore nel recupero delle assegnazioni");
+  }
+
+  await Promise.all((rows ?? []).map(async row => {
+    const plain = await decryptWishlist(row.ciphertext, row.nonce);
+    const receiverId = plain?.[0]?.receiver_participant_id;
+    if (receiverId) map.set(row.participant_id, receiverId);
+  }));
+
+  return map;
+}
+
 // A chi devono fare il regalo i partecipanti di un account
 async function loadMyAssignments(
   accountId: string,
@@ -210,15 +245,13 @@ async function loadMyAssignments(
 
   const myIds = (mine ?? []).map(item => item.id);
 
-  const { data: assignments, error: assignmentsError } = myIds.length
-    ? await adminClient
-        .from("ss_assignments")
-        .select("giver_participant_id, receiver_participant_id")
-        .eq("edition_id", editionId)
-        .in("giver_participant_id", myIds)
-    : { data: [], error: null };
-
-  if (assignmentsError) throw new Error("Errore nel recupero delle assegnazioni");
+  const assignmentMap = await loadAssignmentMap(editionId);
+  const assignments = myIds
+    .filter(id => assignmentMap.has(id))
+    .map(id => ({
+      giver_participant_id: id,
+      receiver_participant_id: assignmentMap.get(id)!,
+    }));
 
   const receiverIds = (assignments ?? []).map(
     item => item.receiver_participant_id,
@@ -986,11 +1019,10 @@ Deno.serve(async (req: Request) => {
         return response({ error: "Errore nel recupero partecipanti" }, 500);
       }
 
-      const { data: allAssignments, error: assignmentsError } =
-        await adminClient
-          .from("ss_assignments")
-          .select("receiver_participant_id")
-          .eq("edition_id", account.edition_id);
+      const assignmentMap = await loadAssignmentMap(account.edition_id);
+      const allAssignments = [...assignmentMap.values()].map(
+        receiver => ({ receiver_participant_id: receiver }),
+      );
 
       const { data: selections, error: selectionsError } =
         await adminClient
@@ -1000,10 +1032,10 @@ Deno.serve(async (req: Request) => {
           )
           .eq("edition_id", account.edition_id);
 
-      if (assignmentsError || selectionsError) {
+      if (selectionsError) {
         console.error(
           "Assignments/selections lookup:",
-          assignmentsError?.message ?? selectionsError?.message,
+          selectionsError.message,
         );
         return response({ error: "Errore nel recupero delle selezioni" }, 500);
       }
@@ -1154,17 +1186,13 @@ Deno.serve(async (req: Request) => {
         }, 409);
       }
 
-      const { data: assignment, error: assignmentError } =
-        await adminClient
-          .from("ss_assignments")
-          .select("giver_participant_id")
-          .eq("edition_id", account.edition_id)
-          .eq("receiver_participant_id", owner.id)
-          .maybeSingle();
-
-      if (assignmentError) {
-        return response({ error: "Errore nel controllo dell'assegnazione." }, 500);
-      }
+      const assignmentMap = await loadAssignmentMap(account.edition_id);
+      const giverOfOwner = [...assignmentMap.entries()].find(
+        ([, receiverId]) => receiverId === owner.id,
+      )?.[0];
+      const assignment = giverOfOwner
+        ? { giver_participant_id: giverOfOwner }
+        : null;
 
       if (!assignment) {
         return response({
@@ -1272,18 +1300,13 @@ Deno.serve(async (req: Request) => {
             .eq("edition_id", account.edition_id)
             .order("display_name");
 
-        const { count: assignmentsCount, error: countError } =
-          await adminClient
-            .from("ss_assignments")
-            .select("id", { count: "exact", head: true })
-            .eq("edition_id", account.edition_id);
+        const assignmentsCount =
+          (await loadAssignmentMap(account.edition_id)).size;
 
-        if (accountsError || participantsError || countError) {
+        if (accountsError || participantsError) {
           console.error(
             "Admin list users:",
-            accountsError?.message ??
-              participantsError?.message ??
-              countError?.message,
+            accountsError?.message ?? participantsError?.message,
           );
           return response({ error: "Errore nel recupero degli utenti" }, 500);
         }
@@ -1465,20 +1488,19 @@ Deno.serve(async (req: Request) => {
         let drawAffected = false;
 
         if (ids.length) {
-          const { count: affected } = await adminClient
-            .from("ss_assignments")
-            .select("id", { count: "exact", head: true })
-            .eq("edition_id", account.edition_id)
-            .or(
-              `giver_participant_id.in.(${ids.join(",")}),receiver_participant_id.in.(${ids.join(",")})`,
-            );
-          drawAffected = (affected ?? 0) > 0;
+          // righe dell'estrazione da togliere: quelle di chi viene eliminato
+          // e quelle di chi avrebbe dovuto fargli il regalo
+          const assignmentMap = await loadAssignmentMap(account.edition_id);
+          const idSet = new Set(ids);
+          const assignmentRowsToDelete = [...assignmentMap.entries()]
+            .filter(([giver, receiver]) => idSet.has(giver) || idSet.has(receiver))
+            .map(([giver]) => giver);
+          drawAffected = assignmentRowsToDelete.length > 0;
 
           const cleanup = [
             adminClient.from("ss_wishlists").delete().in("participant_id", ids),
             adminClient.from("ss_gift_selections").delete().in("owner_participant_id", ids),
-            adminClient.from("ss_assignments").delete().in("giver_participant_id", ids),
-            adminClient.from("ss_assignments").delete().in("receiver_participant_id", ids),
+            adminClient.from("ss_assignments").delete().in("participant_id", [...ids, ...assignmentRowsToDelete]),
           ];
 
           for (const result of await Promise.all(cleanup)) {
@@ -1555,16 +1577,9 @@ Deno.serve(async (req: Request) => {
           }, 400);
         }
 
-        const { count: existing, error: existingError } = await adminClient
-          .from("ss_assignments")
-          .select("id", { count: "exact", head: true })
-          .eq("edition_id", account.edition_id);
+        const existing = (await loadAssignmentMap(account.edition_id)).size;
 
-        if (existingError) {
-          return response({ error: "Errore nel controllo dell'estrazione." }, 500);
-        }
-
-        if ((existing ?? 0) > 0 && body.confirm_redo !== true) {
+        if (existing > 0 && body.confirm_redo !== true) {
           return response({
             error: "L'estrazione è già stata fatta. Ripeterla cancella anche tutte le selezioni dei regali.",
             needs_confirmation: true,
@@ -1592,10 +1607,18 @@ Deno.serve(async (req: Request) => {
           }, 400);
         }
 
-        const rows = people.map((giver, index) => ({
-          edition_id: account.edition_id,
-          giver_participant_id: giver.id,
-          receiver_participant_id: receivers![index].id,
+        // ogni riga è cifrata: dal database non si legge chi pesca chi
+        const rows = await Promise.all(people.map(async (giver, index) => {
+          const encrypted = await encryptWishlist([
+            { receiver_participant_id: receivers![index].id },
+          ]);
+
+          return {
+            participant_id: giver.id,
+            ciphertext: encrypted.ciphertext,
+            nonce: encrypted.nonce,
+            key_version: encrypted.key_version,
+          };
         }));
 
         const { error: clearSelectionsError } = await adminClient
@@ -1606,7 +1629,7 @@ Deno.serve(async (req: Request) => {
         const { error: clearAssignmentsError } = await adminClient
           .from("ss_assignments")
           .delete()
-          .eq("edition_id", account.edition_id);
+          .in("participant_id", people.map(person => person.id));
 
         if (clearSelectionsError || clearAssignmentsError) {
           console.error(
