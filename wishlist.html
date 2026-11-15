@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -9,7 +8,6 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
   <header class="hero">
     <div class="brand">🎄 SECRET SANTA 🎄</div>
     <p>La magia del Natale comincia qui</p>
@@ -18,48 +16,32 @@
 
   <main class="container">
     <section class="panel">
-
       <h1>La mia lista dei desideri 🎁</h1>
-      <p class="intro">
-        Aggiungi i regali che ti piacerebbe ricevere!
-      </p>
+      <p class="intro">Aggiungi i regali che piacerebbe ricevere a ciascun partecipante.</p>
 
-      <label for="participant">Chi vuoi gestire?</label>
-      <select id="participant">
-        <option value="adult">Adulto</option>
+      <label for="participant">Seleziona il partecipante</label>
+      <select id="participant" disabled>
+        <option value="">Caricamento...</option>
       </select>
 
       <div class="notice">
-        💡 Ogni componente della famiglia ha una wishlist personale.
+        💡 Ogni partecipante ha una wishlist personale. Puoi gestire tutte le liste della tua famiglia da qui.
       </div>
 
       <h2>Aggiungi un regalo</h2>
-
       <form id="giftForm">
         <label for="giftName">Nome del regalo</label>
-        <input
-          id="giftName"
-          type="text"
-          maxlength="200"
-          placeholder="Es. Libro, gioco, profumo..."
-          required
-        >
+        <input id="giftName" type="text" maxlength="200"
+          placeholder="Es. Libro, gioco, profumo..." required>
 
         <label for="giftUrl">Link del regalo (facoltativo)</label>
-        <input
-          id="giftUrl"
-          type="url"
-          placeholder="https://..."
-        >
+        <input id="giftUrl" type="url" maxlength="2048" placeholder="https://...">
 
-        <button type="submit" class="primary">
-          + Aggiungi alla wishlist
-        </button>
+        <button type="submit" class="primary">+ Aggiungi alla wishlist</button>
       </form>
 
-      <h2>I miei desideri</h2>
+      <h2>I desideri</h2>
       <div id="giftList"></div>
-
       <p id="message" aria-live="polite"></p>
 
       <div class="notice">
@@ -69,39 +51,78 @@
       <p class="info-link">
         <a href="index.html">← Torna alla pagina iniziale</a>
       </p>
-
     </section>
   </main>
 
-  <footer>
-    ✨ Un regalo, una sorpresa, un Natale speciale ✨
-  </footer>
+  <footer>✨ Un regalo, una sorpresa, un Natale speciale ✨</footer>
 
   <script>
-    const participant = document.getElementById("participant");
+    const SUPABASE_URL = "https://peyedqobyytqwnxaovcr.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_u821cPWqBYZMRlqH0gaSbg_NSooa7_5";
+    const FUNCTION_URL = SUPABASE_URL + "/functions/v1/secret-santa";
+
+    const participantSelect = document.getElementById("participant");
     const giftForm = document.getElementById("giftForm");
     const giftName = document.getElementById("giftName");
     const giftUrl = document.getElementById("giftUrl");
     const giftList = document.getElementById("giftList");
     const message = document.getElementById("message");
 
-    let wishlists = {
-      adult: []
-    };
+    const token = sessionStorage.getItem("ss_access_token");
+    let wishlists = [];
+    let saving = false;
+
+    async function apiCall(action, data = {}) {
+      const headers = {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": "Bearer " + token
+      };
+
+      const response = await fetch(FUNCTION_URL, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action, ...data })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Si è verificato un errore.");
+      }
+      return result;
+    }
+
+    function currentWishlist() {
+      return wishlists.find(item => item.participant_id === participantSelect.value);
+    }
+
+    function setFormEnabled(enabled) {
+      giftName.disabled = !enabled;
+      giftUrl.disabled = !enabled;
+      giftForm.querySelector('button[type="submit"]').disabled = !enabled || saving;
+    }
 
     function renderGifts() {
       giftList.replaceChildren();
+      const wishlist = currentWishlist();
 
-      const gifts = wishlists[participant.value];
-
-      if (gifts.length === 0) {
+      if (!wishlist) {
         const empty = document.createElement("p");
-        empty.textContent = "Non hai ancora aggiunto regali.";
+        empty.textContent = "Seleziona un partecipante per visualizzare la sua lista.";
+        giftList.appendChild(empty);
+        setFormEnabled(false);
+        return;
+      }
+
+      setFormEnabled(true);
+      if (wishlist.gifts.length === 0) {
+        const empty = document.createElement("p");
+        empty.textContent = "Non sono ancora stati aggiunti regali.";
         giftList.appendChild(empty);
         return;
       }
 
-      gifts.forEach((gift, index) => {
+      wishlist.gifts.forEach((gift, index) => {
         const row = document.createElement("div");
         row.className = "gift-row";
 
@@ -118,55 +139,147 @@
           row.appendChild(link);
         }
 
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.className = "secondary";
+        edit.textContent = "Modifica";
+        edit.addEventListener("click", async () => {
+          const newName = prompt("Modifica il nome del regalo:", gift.name);
+          if (newName === null) return;
+          const cleanedName = newName.trim();
+          if (!cleanedName || cleanedName.length > 200) {
+            message.textContent = "Inserisci un nome valido (massimo 200 caratteri).";
+            return;
+          }
+
+          const newUrl = prompt("Modifica il link (lascia vuoto se non serve):", gift.url || "");
+          if (newUrl === null) return;
+          const cleanedUrl = newUrl.trim();
+          if (cleanedUrl) {
+            try {
+              const parsed = new URL(cleanedUrl);
+              if (!["http:", "https:"].includes(parsed.protocol)) throw new Error();
+            } catch {
+              message.textContent = "Inserisci un link valido che inizi con http:// o https://.";
+              return;
+            }
+          }
+
+          wishlist.gifts[index] = { name: cleanedName, ...(cleanedUrl ? { url: cleanedUrl } : {}) };
+          await saveCurrentWishlist("Modifiche salvate.");
+        });
+        row.appendChild(edit);
+
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "remove";
         remove.textContent = "Elimina";
-        remove.addEventListener("click", () => {
-          gifts.splice(index, 1);
-          renderGifts();
+        remove.addEventListener("click", async () => {
+          if (!confirm("Vuoi eliminare questo regalo dalla wishlist?")) return;
+          wishlist.gifts.splice(index, 1);
+          await saveCurrentWishlist("Regalo eliminato.");
         });
-
         row.appendChild(remove);
+
         giftList.appendChild(row);
       });
     }
 
-    participant.addEventListener("change", renderGifts);
+    async function saveCurrentWishlist(successMessage) {
+      const wishlist = currentWishlist();
+      if (!wishlist || saving) return;
 
-    giftForm.addEventListener("submit", event => {
+      saving = true;
+      setFormEnabled(false);
+      message.textContent = "Salvataggio in corso...";
+      try {
+        await apiCall("save_wishlist", {
+          participant_id: wishlist.participant_id,
+          gifts: wishlist.gifts
+        });
+        message.textContent = successMessage;
+      } catch (error) {
+        message.textContent = "Attenzione: " + error.message;
+      } finally {
+        saving = false;
+        renderGifts();
+      }
+    }
+
+    participantSelect.addEventListener("change", () => {
+      message.textContent = "";
+      renderGifts();
+    });
+
+    giftForm.addEventListener("submit", async event => {
       event.preventDefault();
+      const wishlist = currentWishlist();
+      if (!wishlist) return;
 
       const name = giftName.value.trim();
       const url = giftUrl.value.trim();
 
-      if (!name) {
-        message.textContent = "Inserisci il nome del regalo.";
+      if (!name || name.length > 200) {
+        message.textContent = "Inserisci un nome valido (massimo 200 caratteri).";
         return;
       }
-
+      if (wishlist.gifts.length >= 30) {
+        message.textContent = "Hai raggiunto il limite di 30 idee regalo per questa lista.";
+        return;
+      }
       if (url) {
         try {
           const parsed = new URL(url);
-
-          if (!["http:", "https:"].includes(parsed.protocol)) {
-            throw new Error("Link non valido");
-          }
+          if (!["http:", "https:"].includes(parsed.protocol)) throw new Error();
         } catch {
-          message.textContent = "Inserisci un link valido.";
+          message.textContent = "Inserisci un link valido che inizi con http:// o https://.";
           return;
         }
       }
 
-      wishlists[participant.value].push({ name, url });
-
+      wishlist.gifts.push({ name, ...(url ? { url } : {}) });
       giftForm.reset();
-      message.textContent = "Regalo aggiunto alla lista!";
-      renderGifts();
+      await saveCurrentWishlist("Regalo aggiunto e wishlist salvata.");
     });
 
-    renderGifts();
-  </script>
+    async function init() {
+      if (!token) {
+        window.location.href = "index.html";
+        return;
+      }
 
+      setFormEnabled(false);
+      message.textContent = "Caricamento delle wishlist...";
+      try {
+        const accountData = await apiCall("whoami");
+        const wishlistData = await apiCall("my_wishlists");
+
+        wishlists = wishlistData.wishlists || [];
+        participantSelect.replaceChildren();
+
+        wishlists.forEach(item => {
+          const option = document.createElement("option");
+          option.value = item.participant_id;
+          option.textContent = item.display_name;
+          participantSelect.appendChild(option);
+        });
+
+        if (wishlists.length === 0) {
+          participantSelect.disabled = true;
+          message.textContent = "Non risultano partecipanti associati a questo account.";
+          return;
+        }
+
+        participantSelect.disabled = false;
+        message.textContent = "";
+        renderGifts();
+      } catch (error) {
+        message.textContent = error.message + " Prova ad accedere di nuovo dalla pagina iniziale.";
+        setFormEnabled(false);
+      }
+    }
+
+    init();
+  </script>
 </body>
 </html>
