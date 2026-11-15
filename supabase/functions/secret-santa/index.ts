@@ -190,20 +190,20 @@ Deno.serve(async (req: Request) => {
           email_confirm: true,
         });
 
-      if (authResult.error || !authResult.user) {
-        console.error(
-          "Auth registration:",
-          authResult.error?.message,
-        );
-
-        //return response({
-        //  error: "Non è stato possibile creare l'account.",
-        //}, 500);
-
+        
+        if (authResult.error || !authResult.data?.user) {
+          console.error(
+            "Auth registration:",
+            authResult.error?.message,
+          );
+        
           return response({
-          error: "Errore Supabase Auth: " +
-            (authResult.error?.message ?? "utente non restituito"),
-        }, 500);
+            error: "Non è stato possibile creare l'account.",
+          }, 500);
+        }
+        
+        const authUserId = authResult.data.user.id;
+
       }
 
       const authUserId = authResult.user.id;
