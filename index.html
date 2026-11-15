@@ -35,7 +35,7 @@
           <input
             id="loginName"
             type="text"
-            placeholder="Es. Alex"
+            placeholder="Es. Checco Zalone"
             autocomplete="username"
             required
           >
@@ -50,20 +50,20 @@
           >
 
           <button type="submit" class="primary">
-            Entra
+            Accedi
           </button>
         </form>
       </section>
 
       <section id="registerSection" hidden>
-        <h2>Crea il tuo account familiare</h2>
+        <h2>Crea il tuo account</h2>
 
         <form id="registrationForm">
-          <label for="name">Nome e cognome dell'adulto</label>
+          <label for="name">Nome</label>
           <input
             id="name"
             type="text"
-            placeholder="Es. Mario Rossi"
+            placeholder="Es. Checco Zalone"
             autocomplete="name"
             required
           >
@@ -72,8 +72,8 @@
           <input
             id="password"
             type="password"
-            placeholder="Almeno 12 caratteri"
-            minlength="12"
+            placeholder="Almeno 6 caratteri"
+            minlength="6"
             autocomplete="new-password"
             required
           >
@@ -87,7 +87,7 @@
             </label>
 
             <div id="childrenArea" hidden>
-              <p>Inserisci nome e cognome di ogni figlio.</p>
+              <p>Inserisci il nome di ogni figlio.</p>
 
               <div id="childrenList"></div>
 
@@ -105,6 +105,10 @@
             Crea account
           </button>
         </form>
+
+        <button type="button" id="showLogin" class="secondary">
+          Torna ad Accedi
+        </button>
       </section>
 
       <div class="notice">
