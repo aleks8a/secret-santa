@@ -16,7 +16,8 @@ const registerSection = document.getElementById("registerSection");
 const showLogin = document.getElementById("showLogin");
 const showRegister = document.getElementById("showRegister");
 
-showRegister.hidden = true;
+//showRegister.hidden = true;
+
 let children = [];
 
 async function apiCall(action, data = {}, token = null) {
@@ -245,8 +246,9 @@ loginForm.addEventListener("submit", async event => {
   }
 });
 
-// Registrazione: il backend non è ancora pronto
-form.addEventListener("submit", event => {
+
+// Registrazione reale tramite Supabase Edge Function
+form.addEventListener("submit", async event => {
   event.preventDefault();
 
   const parentName = document.getElementById("name").value.trim();
@@ -258,18 +260,48 @@ form.addEventListener("submit", event => {
     return;
   }
 
-  if (
-    hasChildren.checked &&
-    (
-      children.length === 0 ||
-      children.some(name => !name.trim())
-    )
-  ) {
+  const childNames = hasChildren.checked
+    ? children.map(name => name.trim())
+    : [];
+
+  if (childNames.some(name => !name)) {
     message.textContent =
-      "Inserisci il nome di tutti i figli oppure rimuovi i campi vuoti.";
+      "Completa tutti i nomi dei figli oppure rimuovi i campi vuoti.";
     return;
   }
 
-  message.textContent =
-    "La registrazione online sarà attivata nel prossimo passaggio.";
+  const button = form.querySelector('button[type="submit"]');
+
+  try {
+    button.disabled = true;
+    message.textContent = "Registrazione in corso...";
+
+    const result = await apiCall("register", {
+      name: parentName,
+      password,
+      children: childNames
+    });
+
+    // Torna alla schermata di accesso
+    registerSection.hidden = true;
+    loginSection.hidden = false;
+    showRegister.hidden = false;
+
+    form.reset();
+    children = [];
+    renderChildren();
+    childrenArea.hidden = true;
+
+    document.getElementById("loginName").value = parentName;
+    document.getElementById("loginPassword").value = "";
+
+    message.textContent =
+      result.message + " Puoi accedere con il nome utente " +
+      result.account.login_name + ".";
+
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 });
