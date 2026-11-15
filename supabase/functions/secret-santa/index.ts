@@ -392,7 +392,7 @@ async function createFamilyAccount(options: {
     edition_id: editionId,
     account_id: accountId,
     display_name: displayName,
-    participant_type: index === 0 ? "adult" : "child",
+    participant_type: index === 0 ? "adult" : "minor",
     must_reset_password: mustResetPassword,
     created_at: now,
   }));
@@ -615,7 +615,7 @@ Deno.serve(async (req: Request) => {
           edition_id: edition.id,
           account_id: accountId,
           display_name: displayName,
-          participant_type: index === 0 ? "adult" : "child",
+          participant_type: index === 0 ? "adult" : "minor",
           must_reset_password: false,
           created_at: now,
         }),
