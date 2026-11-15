@@ -196,8 +196,13 @@ Deno.serve(async (req: Request) => {
           authResult.error?.message,
         );
 
-        return response({
-          error: "Non è stato possibile creare l'account.",
+        //return response({
+        //  error: "Non è stato possibile creare l'account.",
+        //}, 500);
+
+          return response({
+          error: "Errore Supabase Auth: " +
+            (authResult.error?.message ?? "utente non restituito"),
         }, 500);
       }
 
