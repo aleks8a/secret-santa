@@ -58,6 +58,34 @@ showRegister.addEventListener("click", () => {
   message.textContent = "";
 });
 
+// Password dimenticata: avvisa l'amministratore, che crea una password temporanea
+document.getElementById("forgotPassword").addEventListener("click", async event => {
+  const button = event.currentTarget;
+  const loginName = document.getElementById("loginName").value.trim();
+
+  if (!loginName) {
+    message.textContent =
+      "Scrivi il tuo nome utente nel campo qui sopra, poi premi di nuovo \"Ho dimenticato la password\".";
+    document.getElementById("loginName").focus();
+    return;
+  }
+
+  if (!confirm("Avvisare l'amministratore che hai dimenticato la password di \"" + loginName + "\"?")) {
+    return;
+  }
+
+  try {
+    button.disabled = true;
+    message.textContent = "Invio della richiesta...";
+    const result = await apiCall("request_password_reset", { login_name: loginName });
+    message.textContent = result.message;
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // Gestione dei figli
 function renderChildren() {
   childrenList.replaceChildren();

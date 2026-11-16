@@ -38,6 +38,49 @@ function response(data: unknown, status = 200) {
 function validText(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
+
+// Valida una lista di regali (usata sia dall'utente sia dall'admin).
+// Restituisce un messaggio di errore, oppure null se la lista è valida.
+function validateGifts(gifts: unknown): string | null {
+  if (!Array.isArray(gifts) || gifts.length > 30) {
+    return "La wishlist non è valida. Puoi inserire al massimo 30 idee regalo.";
+  }
+
+  for (const gift of gifts) {
+    if (
+      !gift ||
+      typeof gift !== "object" ||
+      !validText(gift.name) ||
+      gift.name.trim().length > 200
+    ) {
+      return "Ogni regalo deve avere un nome valido.";
+    }
+
+    if (gift.url !== undefined && gift.url !== null && gift.url !== "") {
+      if (typeof gift.url !== "string" || gift.url.length > 2048) {
+        return "Un link della wishlist non è valido.";
+      }
+
+      try {
+        const parsedUrl = new URL(gift.url);
+        if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+          return "I link devono iniziare con http:// o https://.";
+        }
+      } catch {
+        return "Un link della wishlist non è valido.";
+      }
+    }
+  }
+
+  return null;
+}
+
+function cleanGifts(gifts: { name: string; url?: string | null }[]) {
+  return gifts.map(gift => ({
+    name: gift.name.trim(),
+    ...(gift.url ? { url: gift.url.trim() } : {}),
+  }));
+}
 // CIFRATURA DELLE WISHLIST
 async function getWishlistEncryptionKey() {
   const secret = Deno.env.get("WISHLIST_ENCRYPTION_KEY");
@@ -657,6 +700,47 @@ Deno.serve(async (req: Request) => {
       }, 201);
     }
 
+    // PASSWORD DIMENTICATA: segnala all'admin che serve un reset.
+    // La risposta è sempre la stessa, esista o no il nome utente, così
+    // non si può usare questa azione per scoprire chi è registrato.
+    if (action === "request_password_reset") {
+      const loginName = body.login_name;
+
+      if (
+        !validText(loginName) ||
+        loginName.length > 100 ||
+        loginName.includes("%") ||
+        loginName.includes("_")
+      ) {
+        return response({ error: "Inserisci il tuo nome utente." }, 400);
+      }
+
+      const { data: target } = await adminClient
+        .from("ss_accounts")
+        .select("id, role, password_reset_requested_at")
+        .ilike("login_name", loginName.trim())
+        .maybeSingle();
+
+      // l'admin non può chiedere il reset a sé stesso
+      if (target && target.role !== "admin" && !target.password_reset_requested_at) {
+        const { error: requestError } = await adminClient
+          .from("ss_accounts")
+          .update({ password_reset_requested_at: new Date().toISOString() })
+          .eq("id", target.id);
+
+        if (requestError) {
+          console.error("Password reset request:", requestError.message);
+          return response({ error: "Non è stato possibile inviare la richiesta." }, 500);
+        }
+      }
+
+      return response({
+        success: true,
+        message:
+          "Richiesta inviata. Se il nome utente è corretto, l'amministratore è stato avvisato e ti darà una password temporanea.",
+      });
+    }
+
     // LOGIN: nome utente + password
     if (action === "login") {
       const loginName = body.login_name;
@@ -732,6 +816,13 @@ Deno.serve(async (req: Request) => {
       if (accountDataError || !accountData) {
         return response({ error: "Errore nel recupero account" }, 500);
       }
+
+      // se la password si è ricordata, la richiesta di reset non serve più
+      await adminClient
+        .from("ss_accounts")
+        .update({ password_reset_requested_at: null })
+        .eq("id", account.id)
+        .not("password_reset_requested_at", "is", null);
 
       return response({
         success: true,
@@ -811,7 +902,10 @@ Deno.serve(async (req: Request) => {
       const { error: updateAccountError } =
         await adminClient
           .from("ss_accounts")
-          .update({ must_reset_password: false })
+          .update({
+            must_reset_password: false,
+            password_reset_requested_at: null,
+          })
           .eq("id", account.id);
 
       if (updateAccountError) {
@@ -906,43 +1000,13 @@ Deno.serve(async (req: Request) => {
       const participantId = body.participant_id;
       const gifts = body.gifts;
 
-      if (
-        !validText(participantId) ||
-        !Array.isArray(gifts) ||
-        gifts.length > 30
-      ) {
+      const giftsError = validateGifts(gifts);
+
+      if (!validText(participantId) || giftsError) {
         return response({
-          error: "La wishlist non è valida. Puoi inserire al massimo 30 idee regalo.",
+          error: giftsError ??
+            "La wishlist non è valida. Puoi inserire al massimo 30 idee regalo.",
         }, 400);
-      }
-
-      for (const gift of gifts) {
-        if (
-          !gift ||
-          typeof gift !== "object" ||
-          !validText(gift.name) ||
-          gift.name.trim().length > 200
-        ) {
-          return response({ error: "Ogni regalo deve avere un nome valido." }, 400);
-        }
-
-        if (gift.url !== undefined && gift.url !== null && gift.url !== "") {
-          if (
-            typeof gift.url !== "string" ||
-            gift.url.length > 2048
-          ) {
-            return response({ error: "Un link della wishlist non è valido." }, 400);
-          }
-
-          try {
-            const parsedUrl = new URL(gift.url);
-            if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
-              return response({ error: "I link devono iniziare con http:// o https://." }, 400);
-            }
-          } catch {
-            return response({ error: "Un link della wishlist non è valido." }, 400);
-          }
-        }
       }
 
       const { data: edition, error: editionError } =
@@ -978,12 +1042,7 @@ Deno.serve(async (req: Request) => {
         }, 403);
       }
 
-      const encrypted = await encryptWishlist(
-        gifts.map(gift => ({
-          name: gift.name.trim(),
-          ...(gift.url ? { url: gift.url.trim() } : {}),
-        })),
-      );
+      const encrypted = await encryptWishlist(cleanGifts(gifts));
 
       const { error: saveError } = await adminClient
         .from("ss_wishlists")
@@ -1290,7 +1349,9 @@ Deno.serve(async (req: Request) => {
       if (action === "admin_list_users") {
         const { data: accounts, error: accountsError } = await adminClient
           .from("ss_accounts")
-          .select("id, login_name, role, must_reset_password, created_at")
+          .select(
+            "id, login_name, role, must_reset_password, password_reset_requested_at, created_at",
+          )
           .eq("edition_id", account.edition_id)
           .order("login_name");
 
@@ -1422,7 +1483,10 @@ Deno.serve(async (req: Request) => {
 
         const { error: flagError } = await adminClient
           .from("ss_accounts")
-          .update({ must_reset_password: true })
+          .update({
+            must_reset_password: true,
+            password_reset_requested_at: null,
+          })
           .eq("id", target.id);
 
         const { error: participantsFlagError } = await adminClient
@@ -1446,6 +1510,112 @@ Deno.serve(async (req: Request) => {
           login_name: target.login_name,
           temp_password: tempPassword,
         });
+      }
+
+      // IGNORA UNA RICHIESTA DI RESET (es. la persona si è ricordata la password)
+      if (action === "admin_dismiss_reset_request") {
+        const targetId = body.account_id;
+
+        if (!validText(targetId)) {
+          return response({ error: "Richiesta non valida." }, 400);
+        }
+
+        const { error: dismissError } = await adminClient
+          .from("ss_accounts")
+          .update({ password_reset_requested_at: null })
+          .eq("id", targetId)
+          .eq("edition_id", account.edition_id);
+
+        if (dismissError) {
+          console.error("Admin dismiss reset request:", dismissError.message);
+          return response({ error: "Non è stato possibile ignorare la richiesta." }, 500);
+        }
+
+        return response({ success: true });
+      }
+
+      // WISHLIST DI UN QUALSIASI PARTECIPANTE (per correggerla)
+      if (action === "admin_get_wishlist") {
+        const participantId = body.participant_id;
+
+        if (!validText(participantId)) {
+          return response({ error: "Richiesta non valida." }, 400);
+        }
+
+        const { data: participant, error: participantError } =
+          await adminClient
+            .from("ss_participants")
+            .select("id, display_name")
+            .eq("id", participantId)
+            .eq("edition_id", account.edition_id)
+            .maybeSingle();
+
+        if (participantError || !participant) {
+          return response({ error: "Partecipante non trovato." }, 400);
+        }
+
+        const { data: saved, error: savedError } = await adminClient
+          .from("ss_wishlists")
+          .select("ciphertext, nonce")
+          .eq("participant_id", participant.id)
+          .maybeSingle();
+
+        if (savedError) {
+          console.error("Admin get wishlist:", savedError.message);
+          return response({ error: "Errore nel recupero della wishlist." }, 500);
+        }
+
+        return response({
+          success: true,
+          participant_id: participant.id,
+          display_name: participant.display_name,
+          gifts: saved ? await decryptWishlist(saved.ciphertext, saved.nonce) : [],
+        });
+      }
+
+      // SALVATAGGIO DELLA WISHLIST DI UN PARTECIPANTE (senza limite di scadenza)
+      if (action === "admin_save_wishlist") {
+        const participantId = body.participant_id;
+        const gifts = body.gifts;
+
+        const giftsError = validateGifts(gifts);
+
+        if (!validText(participantId) || giftsError) {
+          return response({
+            error: giftsError ?? "Richiesta non valida.",
+          }, 400);
+        }
+
+        const { data: participant, error: participantError } =
+          await adminClient
+            .from("ss_participants")
+            .select("id")
+            .eq("id", participantId)
+            .eq("edition_id", account.edition_id)
+            .maybeSingle();
+
+        if (participantError || !participant) {
+          return response({ error: "Partecipante non trovato." }, 400);
+        }
+
+        const encrypted = await encryptWishlist(cleanGifts(gifts));
+
+        const { error: saveError } = await adminClient
+          .from("ss_wishlists")
+          .upsert({
+            participant_id: participant.id,
+            ciphertext: encrypted.ciphertext,
+            nonce: encrypted.nonce,
+            key_version: encrypted.key_version,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "participant_id" });
+
+        if (saveError) {
+          console.error("Admin wishlist save:", saveError.message);
+          return response({ error: "Non è stato possibile salvare la wishlist." }, 500);
+        }
+
+        return response({ success: true, message: "Wishlist salvata." });
       }
 
       // ELIMINAZIONE DI UN UTENTE (con i suoi partecipanti e dati collegati)
@@ -1726,6 +1896,19 @@ Deno.serve(async (req: Request) => {
         return response({ error: "Errore nel recupero partecipanti" }, 500);
       }
 
+      // per l'admin: quante persone hanno chiesto il reset della password
+      let pendingResetCount = 0;
+
+      if (account.role === "admin") {
+        const { count } = await adminClient
+          .from("ss_accounts")
+          .select("id", { count: "exact", head: true })
+          .eq("edition_id", account.edition_id)
+          .not("password_reset_requested_at", "is", null);
+
+        pendingResetCount = count ?? 0;
+      }
+
       return response({
         success: true,
         account: {
@@ -1734,6 +1917,7 @@ Deno.serve(async (req: Request) => {
           role: account.role,
           must_reset_password: account.must_reset_password,
         },
+        pending_reset_count: pendingResetCount,
         edition,
         participants: participants ?? [],
       });

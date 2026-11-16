@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15392e">
+  <title>Modifica wishlist – Secret Santa 2026</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .gift-edit {
+      background: #fafaf7;
+      border: 1px solid #e3e9df;
+      border-radius: 12px;
+      padding: 12px;
+      margin-top: 10px;
+    }
+    .gift-edit input { margin-top: 0; margin-bottom: 8px; }
+    .gift-edit .row-actions { display: flex; gap: 8px; }
+    .gift-edit .row-actions button { margin-top: 0; padding: 8px; flex: 1; font-size: 13px; }
+    .save-bar { position: sticky; bottom: 0; background: white; padding: 12px 0 4px; }
+    .top-actions { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">🎄 SECRET SANTA 🎄</div>
+    <p>La magia del Natale comincia qui</p>
+    <span class="status">AMMINISTRATORE</span>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <div class="top-actions">
+        <a href="admin.html" id="backLink">← Impostazioni</a>
+      </div>
+
+      <h1 id="title">Wishlist</h1>
+      <p class="intro">
+        Correggi i regali di questa persona. Le modifiche valgono solo dopo
+        aver premuto "Salva". Se un regalo contiene più idee in un'unica riga,
+        usa ✂️ per dividerlo (a ogni virgola, punto e virgola o a capo).
+      </p>
+
+      <div class="notice">
+        ⚠️ Se cambi il nome o il link di un regalo già scelto da qualcuno,
+        quella scelta viene annullata e il regalo torna disponibile.
+      </div>
+
+      <div id="giftList"></div>
+
+      <button type="button" id="addGift" class="secondary">+ Aggiungi un regalo</button>
+
+      <p id="message" aria-live="polite">Caricamento...</p>
+
+      <div class="save-bar">
+        <button type="button" id="saveButton" class="primary" disabled>Salva wishlist</button>
+      </div>
+    </section>
+  </main>
+
+  <footer>✨ Un regalo, una sorpresa, un Natale speciale ✨</footer>
+
+  <script src="common.js?v=1"></script>
+  <script>
+    const MAX_GIFTS = 30;
+    const participantId = new URLSearchParams(location.search).get("participant");
+
+    const giftList = document.getElementById("giftList");
+    const message = document.getElementById("message");
+    const saveButton = document.getElementById("saveButton");
+    const addGiftButton = document.getElementById("addGift");
+
+    let gifts = [];
+    let dirty = false;
+
+    function markDirty() {
+      dirty = true;
+      saveButton.disabled = false;
+    }
+
+    window.addEventListener("beforeunload", event => {
+      if (dirty) { event.preventDefault(); event.returnValue = ""; }
+    });
+
+    function validUrl(value) {
+      try {
+        return ["http:", "https:"].includes(new URL(value).protocol);
+      } catch {
+        return false;
+      }
+    }
+
+    function render() {
+      giftList.replaceChildren();
+
+      if (gifts.length === 0) {
+        const empty = document.createElement("p");
+        empty.textContent = "Nessun regalo in questa wishlist.";
+        giftList.appendChild(empty);
+      }
+
+      gifts.forEach((gift, index) => {
+        const card = document.createElement("div");
+        card.className = "gift-edit";
+
+        const name = document.createElement("input");
+        name.type = "text";
+        name.maxLength = 200;
+        name.placeholder = "Nome del regalo";
+        name.value = gift.name;
+        name.setAttribute("aria-label", "Nome del regalo " + (index + 1));
+        name.addEventListener("input", () => { gift.name = name.value; markDirty(); });
+
+        const url = document.createElement("input");
+        url.type = "url";
+        url.maxLength = 2048;
+        url.placeholder = "Link (facoltativo) https://...";
+        url.value = gift.url || "";
+        url.setAttribute("aria-label", "Link del regalo " + (index + 1));
+        url.addEventListener("input", () => { gift.url = url.value; markDirty(); });
+
+        const actions = document.createElement("div");
+        actions.className = "row-actions";
+
+        const split = document.createElement("button");
+        split.type = "button";
+        split.className = "secondary";
+        split.textContent = "✂️ Dividi";
+        split.title = "Dividi in più regali a ogni virgola, punto e virgola o a capo";
+        split.addEventListener("click", () => splitGift(index));
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "danger";
+        remove.textContent = "🗑️ Elimina";
+        remove.addEventListener("click", () => {
+          gifts.splice(index, 1);
+          markDirty();
+          render();
+        });
+
+        actions.append(split, remove);
+        card.append(name, url, actions);
+        giftList.appendChild(card);
+      });
+
+      addGiftButton.disabled = gifts.length >= MAX_GIFTS;
+    }
+
+    // "Libro, Puzzle; Sciarpa" -> tre regali. Il link resta sul primo.
+    function splitGift(index) {
+      const gift = gifts[index];
+      const parts = gift.name.split(/[,;\n]+/).map(p => p.trim()).filter(Boolean);
+
+      if (parts.length < 2) {
+        message.textContent = "Niente da dividere: non ci sono virgole, punti e virgola o a capo nel nome.";
+        return;
+      }
+      if (gifts.length - 1 + parts.length > MAX_GIFTS) {
+        message.textContent = "Dividendo si supererebbe il limite di " + MAX_GIFTS + " regali.";
+        return;
+      }
+
+      const replacement = parts.map((part, i) => ({
+        name: part,
+        ...(i === 0 && gift.url ? { url: gift.url } : {})
+      }));
+      gifts.splice(index, 1, ...replacement);
+      message.textContent = "Diviso in " + parts.length + " regali. Ricorda di salvare.";
+      markDirty();
+      render();
+    }
+
+    addGiftButton.addEventListener("click", () => {
+      gifts.push({ name: "", url: "" });
+      markDirty();
+      render();
+      const inputs = giftList.querySelectorAll('input[type="text"]');
+      inputs[inputs.length - 1]?.focus();
+    });
+
+    saveButton.addEventListener("click", async () => {
+      const cleaned = [];
+
+      for (const gift of gifts) {
+        const name = (gift.name || "").trim();
+        const url = (gift.url || "").trim();
+
+        if (!name && !url) continue; // riga vuota: si ignora
+        if (!name || name.length > 200) {
+          message.textContent = "Ogni regalo deve avere un nome (massimo 200 caratteri).";
+          return;
+        }
+        if (url && !validUrl(url)) {
+          message.textContent = "Il link di \"" + name + "\" non è valido: deve iniziare con http:// o https://.";
+          return;
+        }
+        cleaned.push({ name, ...(url ? { url } : {}) });
+      }
+
+      saveButton.disabled = true;
+      message.textContent = "Salvataggio in corso...";
+      try {
+        await ssApi("admin_save_wishlist", { participant_id: participantId, gifts: cleaned });
+        gifts = cleaned;
+        dirty = false;
+        message.textContent = "Wishlist salvata ✓";
+        render();
+      } catch (error) {
+        message.textContent = "Attenzione: " + error.message;
+        saveButton.disabled = false;
+      }
+    });
+
+    async function init() {
+      if (!ssToken()) {
+        window.location.replace("index.html");
+        return;
+      }
+      if (!participantId) {
+        window.location.replace("admin.html");
+        return;
+      }
+
+      try {
+        const data = await ssApi("admin_get_wishlist", { participant_id: participantId });
+        document.getElementById("title").textContent = "Wishlist di " + data.display_name + " 🎁";
+        gifts = (data.gifts || []).map(g => ({ name: g.name, url: g.url || "" }));
+        message.textContent = "";
+        render();
+      } catch (error) {
+        if (ssSessionExpired(error)) {
+          sessionStorage.removeItem(SS_TOKEN_KEY);
+          window.location.replace("index.html");
+          return;
+        }
+        if (error.status === 403) {
+          window.location.replace("home.html");
+          return;
+        }
+        message.textContent = error.message;
+        addGiftButton.disabled = true;
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -38,6 +38,15 @@
     details.add-user summary {
       cursor: pointer; font-weight: bold; font-size: 15px; padding: 12px 0;
     }
+    .user-card.requested { border-color: #d62828; background: #fdf1f1; }
+    .user-card .tag.requested { background: #d62828; color: white; }
+    .wishlist-links { margin-top: 10px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+    .requests-box {
+      margin-top: 18px; padding: 14px 16px; border-radius: 12px;
+      background: #fdf1f1; border: 2px solid #d62828;
+    }
+    .requests-box h2 { margin-top: 0; }
+    .requests-box .user-card { background: white; }
     .top-actions { display: flex; justify-content: space-between; gap: 10px; }
     .top-actions a { font-size: 14px; }
     .top-actions button { margin: 0; }
@@ -61,6 +70,15 @@
       <p id="message" aria-live="polite">Caricamento...</p>
 
       <div id="tempBox" class="temp-box" hidden></div>
+
+      <div id="requestsBox" class="requests-box" hidden>
+        <h2>🔴 Password dimenticata</h2>
+        <p class="intro">
+          Queste persone hanno chiesto un reset. Chiamale e comunica loro una
+          password temporanea.
+        </p>
+        <div id="requestsList"></div>
+      </div>
 
       <h2>Estrazione Secret Santa 🎅</h2>
       <p class="intro" id="drawStatus"></p>
@@ -103,6 +121,8 @@
   <script>
     const message = document.getElementById("message");
     const usersList = document.getElementById("usersList");
+    const requestsBox = document.getElementById("requestsBox");
+    const requestsList = document.getElementById("requestsList");
     const tempBox = document.getElementById("tempBox");
     const drawButton = document.getElementById("drawButton");
     const resetDrawButton = document.getElementById("resetDrawButton");
@@ -164,57 +184,93 @@
 
     function renderUsers(users) {
       usersList.replaceChildren();
+      requestsList.replaceChildren();
 
-      users.forEach(user => {
-        const card = document.createElement("div");
-        card.className = "user-card";
+      const requested = users.filter(u => u.password_reset_requested_at && u.id !== currentAccountId);
+      requestsBox.hidden = requested.length === 0;
 
-        const title = document.createElement("h3");
-        title.textContent = user.login_name;
-        if (user.role === "admin") {
-          const tag = document.createElement("span");
-          tag.className = "tag";
-          tag.textContent = "admin";
-          title.appendChild(tag);
-        }
-        if (user.must_reset_password) {
-          const tag = document.createElement("span");
-          tag.className = "tag pending";
-          tag.textContent = "deve cambiare password";
-          title.appendChild(tag);
-        }
-        card.appendChild(title);
+      // chi ha chiesto il reset compare in cima nel riquadro rosso, e anche nell'elenco
+      requested.forEach(user => requestsList.appendChild(buildUserCard(user, true)));
+      users.forEach(user => usersList.appendChild(buildUserCard(user, false)));
+    }
 
-        const members = document.createElement("div");
-        members.className = "members";
-        const children = user.participants.filter(p => p.display_name !== user.login_name);
-        members.textContent = children.length
-          ? "Figli: " + children.map(p => p.display_name).join(", ")
-          : "Nessun figlio";
-        card.appendChild(members);
+    function buildUserCard(user, inRequestsBox) {
+      const card = document.createElement("div");
+      card.className = "user-card" + (user.password_reset_requested_at && !inRequestsBox ? " requested" : "");
 
-        if (user.id !== currentAccountId) {
-          const actions = document.createElement("div");
-          actions.className = "user-actions";
+      const title = document.createElement("h3");
+      title.textContent = user.login_name;
+      if (user.role === "admin") {
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = "admin";
+        title.appendChild(tag);
+      }
+      if (user.password_reset_requested_at) {
+        const tag = document.createElement("span");
+        tag.className = "tag requested";
+        tag.textContent = "ha dimenticato la password";
+        title.appendChild(tag);
+      }
+      if (user.must_reset_password) {
+        const tag = document.createElement("span");
+        tag.className = "tag pending";
+        tag.textContent = "deve cambiare password";
+        title.appendChild(tag);
+      }
+      card.appendChild(title);
 
-          const reset = document.createElement("button");
-          reset.type = "button";
-          reset.className = "secondary";
-          reset.textContent = "Reset password";
-          reset.addEventListener("click", () => resetPassword(user, reset));
+      const members = document.createElement("div");
+      members.className = "members";
+      const children = user.participants.filter(p => p.display_name !== user.login_name);
+      members.textContent = children.length
+        ? "Figli: " + children.map(p => p.display_name).join(", ")
+        : "Nessun figlio";
+      card.appendChild(members);
 
-          const del = document.createElement("button");
-          del.type = "button";
-          del.className = "danger";
-          del.textContent = "Elimina";
-          del.addEventListener("click", () => deleteUser(user, del));
+      if (user.id !== currentAccountId) {
+        const actions = document.createElement("div");
+        actions.className = "user-actions";
 
+        const reset = document.createElement("button");
+        reset.type = "button";
+        reset.className = "secondary";
+        reset.textContent = "Reset password";
+        reset.addEventListener("click", () => resetPassword(user, reset));
+
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "danger";
+        del.textContent = "Elimina";
+        del.addEventListener("click", () => deleteUser(user, del));
+
+        if (inRequestsBox) {
+          const dismiss = document.createElement("button");
+          dismiss.type = "button";
+          dismiss.className = "secondary";
+          dismiss.textContent = "Ignora richiesta";
+          dismiss.addEventListener("click", () => dismissRequest(user, dismiss));
+          actions.append(reset, dismiss);
+        } else {
           actions.append(reset, del);
-          card.appendChild(actions);
         }
+        card.appendChild(actions);
+      }
 
-        usersList.appendChild(card);
-      });
+      // modifica delle wishlist (es. per correggere un errore)
+      if (!inRequestsBox && user.participants.length) {
+        const links = document.createElement("div");
+        links.className = "wishlist-links";
+        user.participants.forEach(p => {
+          const link = document.createElement("a");
+          link.href = "admin-wishlist.html?participant=" + encodeURIComponent(p.id);
+          link.textContent = "🎁 Wishlist di " + p.display_name;
+          links.appendChild(link);
+        });
+        card.appendChild(links);
+      }
+
+      return card;
     }
 
     async function loadUsers(notice) {
@@ -250,6 +306,17 @@
         const result = await ssApi("admin_reset_password", { account_id: user.id });
         showTempPassword("Password resettata", result.login_name, result.temp_password);
         await loadUsers("Password di " + result.login_name + " resettata.");
+      } catch (error) {
+        message.textContent = error.message;
+        button.disabled = false;
+      }
+    }
+
+    async function dismissRequest(user, button) {
+      button.disabled = true;
+      try {
+        await ssApi("admin_dismiss_reset_request", { account_id: user.id });
+        await loadUsers("Richiesta di " + user.login_name + " ignorata.");
       } catch (error) {
         message.textContent = error.message;
         button.disabled = false;

@@ -265,3 +265,26 @@ a.button-link {
   margin: 0 0 6px;
   font-size: 14px;
 }
+
+/* Password dimenticata */
+.forgot-button {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  font-size: 13px;
+  text-decoration: underline;
+}
+
+/* Puntino rosso di notifica (richieste di reset password) */
+.nav-link .dot,
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: #d62828;
+  box-shadow: 0 0 0 2px rgba(214, 40, 40, 0.25);
+  vertical-align: middle;
+}

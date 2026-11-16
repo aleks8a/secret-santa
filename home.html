@@ -23,7 +23,7 @@
         <a class="nav-link primary-link" href="partecipanti.html">🎅 Partecipanti e regali</a>
         <a class="nav-link" href="wishlist.html">🎁 La mia wishlist</a>
         <a class="nav-link" href="secret-santa.html">🤫 Il nostro Secret Santa</a>
-        <a class="nav-link" id="adminLink" href="admin.html" hidden>⚙️ Pannello amministratore</a>
+        <a class="nav-link" id="adminLink" href="admin.html" hidden>⚙️ Pannello amministratore<span class="dot" id="adminDot" title="Richieste di reset password" hidden></span></a>
       </div>
 
       <p id="message" aria-live="polite"></p>
@@ -54,6 +54,7 @@
 
         if (data.account.role === "admin") {
           document.getElementById("adminLink").hidden = false;
+          document.getElementById("adminDot").hidden = !(data.pending_reset_count > 0);
         }
       } catch (error) {
         if (ssSessionExpired(error) || (error.data && error.data.must_reset_password)) {
