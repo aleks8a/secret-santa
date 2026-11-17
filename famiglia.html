@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15392e">
+  <title>La mia famiglia – Secret Santa 2026</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .member-row {
+      display: flex; align-items: center; gap: 10px;
+      background: #fafaf7; border: 1px solid #e3e9df; border-radius: 12px;
+      padding: 10px 14px; margin-top: 10px;
+    }
+    .member-row .name { flex: 1; overflow-wrap: anywhere; font-weight: bold; color: var(--green); }
+    .member-row .kind { font-size: 12px; color: #718077; }
+    .member-row button { margin: 0; width: auto; padding: 8px 12px; font-size: 13px; }
+    .danger-zone { margin-top: 30px; padding-top: 6px; border-top: 1px solid #e3e9df; }
+    .top-actions { font-size: 14px; }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">🎄 SECRET SANTA 🎄</div>
+    <p>La magia del Natale comincia qui</p>
+    <span class="status">LA MIA FAMIGLIA</span>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <div class="top-actions"><a href="home.html">← La mia pagina</a></div>
+
+      <h1>La mia famiglia 👨‍👩‍👧</h1>
+      <p class="intro">Qui puoi aggiungere o togliere i tuoi figli.</p>
+
+      <div id="drawNotice" class="notice" hidden>
+        L'estrazione è già stata fatta, quindi non si può più cambiare la
+        famiglia da qui. Per aggiungere o togliere qualcuno chiedi
+        all'amministratore.
+      </div>
+
+      <div id="memberList"></div>
+
+      <form id="addForm">
+        <h2>Aggiungi un figlio</h2>
+        <label for="childName">Nome e cognome</label>
+        <input id="childName" type="text" maxlength="100" placeholder="Nome del figlio/a" required>
+        <button type="submit" class="primary" id="addButton">Aggiungi</button>
+      </form>
+
+      <p id="message" aria-live="polite">Caricamento...</p>
+
+      <div class="danger-zone" id="dangerZone" hidden>
+        <h2>Elimina il mio account</h2>
+        <p class="intro">
+          Cancella il tuo account, i tuoi figli, le wishlist e i regali scelti.
+          L'operazione non si può annullare.
+        </p>
+        <button type="button" id="deleteAccount" class="danger">Elimina il mio account</button>
+      </div>
+    </section>
+  </main>
+
+  <footer>✨ Un regalo, una sorpresa, un Natale speciale ✨</footer>
+
+  <script src="common.js?v=1"></script>
+  <script>
+    const message = document.getElementById("message");
+    const memberList = document.getElementById("memberList");
+    const addForm = document.getElementById("addForm");
+    const deleteAccountButton = document.getElementById("deleteAccount");
+
+    function fail(error) {
+      if (ssSessionExpired(error)) {
+        sessionStorage.removeItem(SS_TOKEN_KEY);
+        window.location.replace("index.html");
+        return;
+      }
+      message.textContent = error.message;
+    }
+
+    function render(data) {
+      memberList.replaceChildren();
+
+      data.members.forEach(member => {
+        const row = document.createElement("div");
+        row.className = "member-row";
+
+        const info = document.createElement("div");
+        info.className = "name";
+        info.textContent = member.display_name;
+        const kind = document.createElement("div");
+        kind.className = "kind";
+        kind.textContent = member.participant_type === "minor" ? "figlio/a" : "tu";
+        info.appendChild(kind);
+        row.appendChild(info);
+
+        if (member.participant_type === "minor") {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "danger";
+          remove.textContent = "Togli";
+          remove.disabled = data.draw_done;
+          remove.addEventListener("click", () => removeChild(member, remove));
+          row.appendChild(remove);
+        }
+        memberList.appendChild(row);
+      });
+
+      document.getElementById("drawNotice").hidden = !data.draw_done;
+      addForm.querySelectorAll("input, button").forEach(el => { el.disabled = data.draw_done; });
+      // l'amministratore non può eliminare il proprio account
+      document.getElementById("dangerZone").hidden = data.role === "admin";
+      deleteAccountButton.disabled = data.draw_done;
+    }
+
+    async function load(notice) {
+      try {
+        render(await ssApi("my_family"));
+        message.textContent = notice || "";
+      } catch (error) {
+        fail(error);
+      }
+    }
+
+    async function removeChild(member, button) {
+      if (!confirm('Togliere "' + member.display_name + '"? Verranno cancellate anche le sue wishlist.')) return;
+      button.disabled = true;
+      try {
+        const result = await ssApi("remove_child", { participant_id: member.id });
+        await load(result.message);
+      } catch (error) {
+        message.textContent = error.message;
+        button.disabled = false;
+      }
+    }
+
+    addForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      const input = document.getElementById("childName");
+      const button = document.getElementById("addButton");
+      button.disabled = true;
+      try {
+        const result = await ssApi("add_child", { name: input.value.trim() });
+        input.value = "";
+        await load(result.message);
+      } catch (error) {
+        message.textContent = error.message;
+        button.disabled = false;
+      }
+    });
+
+    deleteAccountButton.addEventListener("click", async () => {
+      if (!confirm("Eliminare definitivamente il tuo account, i tuoi figli, le wishlist e i regali scelti? Non si può annullare.")) return;
+      if (!confirm("Sei proprio sicuro/a? Dopo non potrai più accedere con questo account.")) return;
+      deleteAccountButton.disabled = true;
+      try {
+        await ssApi("delete_my_account");
+        sessionStorage.removeItem(SS_TOKEN_KEY);
+        alert("Il tuo account è stato eliminato.");
+        window.location.replace("index.html");
+      } catch (error) {
+        message.textContent = error.message;
+        deleteAccountButton.disabled = false;
+      }
+    });
+
+    (async function init() {
+      if (!ssToken()) { window.location.replace("index.html"); return; }
+      await load();
+    })();
+  </script>
+</body>
+</html>

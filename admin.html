@@ -47,6 +47,16 @@
     }
     .requests-box h2 { margin-top: 0; }
     .requests-box .user-card { background: white; }
+    .child-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 13px; }
+    .child-row .child-name { flex: 1; overflow-wrap: anywhere; }
+    .child-row button { margin: 0; width: auto; padding: 4px 10px; font-size: 12px; }
+    .participants-box { margin-top: 14px; }
+    .participants-box summary { cursor: pointer; font-weight: bold; font-size: 15px; padding: 8px 0; }
+    .family-group { margin-top: 8px; padding: 8px 12px; background: #fafaf7; border: 1px solid #e3e9df; border-radius: 10px; }
+    .family-group h4 { margin: 0 0 4px; font-size: 13px; color: var(--green); }
+    .family-group label { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 4px 0; font-weight: normal; }
+    .family-group input[type=checkbox] { width: auto; margin: 0; }
+    .family-group label.is-excluded span { text-decoration: line-through; color: #718077; }
     .top-actions { display: flex; justify-content: space-between; gap: 10px; }
     .top-actions a { font-size: 14px; }
     .top-actions button { margin: 0; }
@@ -82,6 +92,14 @@
 
       <h2>Estrazione Secret Santa 🎅</h2>
       <p class="intro" id="drawStatus"></p>
+      <details class="participants-box" id="participantsBox">
+        <summary>👥 Chi partecipa all'estrazione</summary>
+        <p class="intro" id="participantsHint">
+          Togli la spunta a chi non deve partecipare (es. animali di casa):
+          non pescherà e non verrà pescato.
+        </p>
+        <div id="participantsList"></div>
+      </details>
       <button type="button" id="drawButton" class="primary">Fai l'estrazione</button>
       <button type="button" id="resetDrawButton" class="danger" hidden>Reset estrazione</button>
 
@@ -123,6 +141,8 @@
     const usersList = document.getElementById("usersList");
     const requestsBox = document.getElementById("requestsBox");
     const requestsList = document.getElementById("requestsList");
+    const participantsList = document.getElementById("participantsList");
+    const participantsHint = document.getElementById("participantsHint");
     const tempBox = document.getElementById("tempBox");
     const drawButton = document.getElementById("drawButton");
     const resetDrawButton = document.getElementById("resetDrawButton");
@@ -192,6 +212,67 @@
       // chi ha chiesto il reset compare in cima nel riquadro rosso, e anche nell'elenco
       requested.forEach(user => requestsList.appendChild(buildUserCard(user, true)));
       users.forEach(user => usersList.appendChild(buildUserCard(user, false)));
+      renderParticipants(users);
+    }
+
+    function renderParticipants(users) {
+      participantsList.replaceChildren();
+
+      users.forEach(user => {
+        if (!user.participants.length) return;
+        const group = document.createElement("div");
+        group.className = "family-group";
+        const heading = document.createElement("h4");
+        heading.textContent = "Famiglia di " + user.login_name;
+        group.appendChild(heading);
+
+        user.participants.forEach(p => {
+          const label = document.createElement("label");
+          label.className = p.excluded_from_draw ? "is-excluded" : "";
+          const box = document.createElement("input");
+          box.type = "checkbox";
+          box.checked = !p.excluded_from_draw;
+          box.disabled = drawDone;
+          box.addEventListener("change", () => setExcluded(p, !box.checked, box));
+          const name = document.createElement("span");
+          name.textContent = p.display_name;
+          label.append(box, name);
+          group.appendChild(label);
+        });
+        participantsList.appendChild(group);
+      });
+
+      participantsHint.textContent = drawDone
+        ? "L'estrazione è già stata fatta: per cambiare chi partecipa resettala prima."
+        : "Togli la spunta a chi non deve partecipare (es. animali di casa): non pescherà e non verrà pescato.";
+    }
+
+    async function setExcluded(participant, excluded, box) {
+      box.disabled = true;
+      try {
+        await ssApi("admin_set_excluded", { participant_id: participant.id, excluded });
+        await loadUsers(participant.display_name + (excluded ? " escluso dall'estrazione." : " incluso nell'estrazione."));
+      } catch (error) {
+        message.textContent = error.message;
+        box.checked = !excluded;
+        box.disabled = false;
+      }
+    }
+
+    async function deleteChild(child, button) {
+      if (!confirm('Eliminare "' + child.display_name + '" con le sue wishlist? L\'operazione non si può annullare.')) return;
+      button.disabled = true;
+      try {
+        const result = await ssApi("admin_delete_participant", { participant_id: child.id });
+        let notice = result.message;
+        if (result.draw_affected) {
+          notice += " Attenzione: era coinvolto nell'estrazione, conviene ripeterla.";
+        }
+        await loadUsers(notice);
+      } catch (error) {
+        message.textContent = error.message;
+        button.disabled = false;
+      }
     }
 
     function buildUserCard(user, inRequestsBox) {
@@ -220,13 +301,30 @@
       }
       card.appendChild(title);
 
-      const members = document.createElement("div");
-      members.className = "members";
-      const children = user.participants.filter(p => p.display_name !== user.login_name);
-      members.textContent = children.length
-        ? "Figli: " + children.map(p => p.display_name).join(", ")
-        : "Nessun figlio";
-      card.appendChild(members);
+      const children = user.participants.filter(p => p.participant_type === "minor");
+      if (!children.length) {
+        const none = document.createElement("div");
+        none.className = "members";
+        none.textContent = "Nessun figlio";
+        card.appendChild(none);
+      }
+      children.forEach(child => {
+        const row = document.createElement("div");
+        row.className = "child-row members";
+        const name = document.createElement("span");
+        name.className = "child-name";
+        name.textContent = "👶 " + child.display_name + (child.excluded_from_draw ? " (escluso dall'estrazione)" : "");
+        row.appendChild(name);
+        if (!inRequestsBox) {
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "danger";
+          del.textContent = "Elimina";
+          del.addEventListener("click", () => deleteChild(child, del));
+          row.appendChild(del);
+        }
+        card.appendChild(row);
+      });
 
       if (user.id !== currentAccountId) {
         const actions = document.createElement("div");
@@ -285,7 +383,7 @@
         drawButton.textContent = drawDone ? "Ripeti l'estrazione" : "Fai l'estrazione";
         resetDrawButton.hidden = !drawDone;
         const totalParticipants = data.users.reduce(
-          (total, user) => total + (user.participants || []).length,
+          (total, user) => total + (user.participants || []).filter(p => !p.excluded_from_draw).length,
           0,
         );
         const countSummary =
