@@ -288,3 +288,14 @@ a.button-link {
   box-shadow: 0 0 0 2px rgba(214, 40, 40, 0.25);
   vertical-align: middle;
 }
+
+/* Il puntino rosso sta in alto a destra del pulsante */
+.nav-link { position: relative; }
+.nav-link .dot {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  margin: 0;
+  width: 12px;
+  height: 12px;
+}

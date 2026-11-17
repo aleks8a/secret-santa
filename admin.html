@@ -110,8 +110,8 @@
       </p>
       <div id="usersList"></div>
 
-      <h2>Aggiungi un utente</h2>
-      <details class="add-user">
+      <h2 id="addUserTitle">Aggiungi un utente</h2>
+      <details class="add-user" id="addUserDetails">
         <summary>＋ Nuovo utente</summary>
         <form id="addUserForm">
           <label for="newName">Nome e cognome</label>
@@ -149,6 +149,8 @@
     const drawStatus = document.getElementById("drawStatus");
     const addUserForm = document.getElementById("addUserForm");
     const newChildren = document.getElementById("newChildren");
+    const addUserDetails = document.getElementById("addUserDetails");
+    const addUserTitle = document.getElementById("addUserTitle");
 
     let currentAccountId = null;
     let drawDone = false;
@@ -320,6 +322,7 @@
           del.type = "button";
           del.className = "danger";
           del.textContent = "Elimina";
+          del.disabled = drawDone;
           del.addEventListener("click", () => deleteChild(child, del));
           row.appendChild(del);
         }
@@ -340,6 +343,7 @@
         del.type = "button";
         del.className = "danger";
         del.textContent = "Elimina";
+        del.disabled = drawDone;
         del.addEventListener("click", () => deleteUser(user, del));
 
         if (inRequestsBox) {
@@ -378,9 +382,11 @@
         drawDone = data.draw_done;
         renderUsers(data.users);
         drawStatus.textContent = drawDone
-          ? "L'estrazione è stata fatta. Ripeterla cancella le assegnazioni e tutte le selezioni dei regali."
+          ? "L'estrazione è stata fatta. Finché non la resetti non si possono aggiungere né eliminare persone (figli compresi). Ripeterla cancella le assegnazioni e tutte le selezioni dei regali."
           : "L'estrazione non è ancora stata fatta. Falla quando tutti sono iscritti: nessuno pesca sé stesso o un familiare.";
         drawButton.textContent = drawDone ? "Ripeti l'estrazione" : "Fai l'estrazione";
+        addUserDetails.hidden = drawDone;
+        addUserTitle.hidden = drawDone;
         resetDrawButton.hidden = !drawDone;
         const totalParticipants = data.users.reduce(
           (total, user) => total + (user.participants || []).filter(p => !p.excluded_from_draw).length,

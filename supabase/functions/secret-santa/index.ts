@@ -460,6 +460,119 @@ async function createFamilyAccount(options: {
   return { accountId, participants: newParticipants };
 }
 
+// Toglie wishlist, selezioni e assegnazioni dei partecipanti indicati
+// (e le assegnazioni di chi avrebbe dovuto fargli il regalo), poi li elimina.
+async function removeParticipants(ids: string[], editionId: string) {
+  if (!ids.length) return { error: null as string | null, drawAffected: false };
+
+  const assignmentMap = await loadAssignmentMap(editionId);
+  const idSet = new Set(ids);
+  const assignmentRowsToDelete = [...assignmentMap.entries()]
+    .filter(([giver, receiver]) => idSet.has(giver) || idSet.has(receiver))
+    .map(([giver]) => giver);
+
+  const cleanup = [
+    adminClient.from("ss_wishlists").delete().in("participant_id", ids),
+    adminClient.from("ss_gift_selections").delete().in("owner_participant_id", ids),
+    adminClient.from("ss_assignments").delete().in(
+      "participant_id",
+      [...ids, ...assignmentRowsToDelete],
+    ),
+  ];
+
+  for (const result of await Promise.all(cleanup)) {
+    if (result.error) {
+      console.error("Remove participants cleanup:", result.error.message);
+      return { error: "Errore nella pulizia dei dati.", drawAffected: false };
+    }
+  }
+
+  const { error: deleteError } = await adminClient
+    .from("ss_participants")
+    .delete()
+    .in("id", ids)
+    .eq("edition_id", editionId);
+
+  if (deleteError) {
+    console.error("Remove participants:", deleteError.message);
+    return { error: "Errore nell'eliminazione dei partecipanti.", drawAffected: false };
+  }
+
+  return { error: null as string | null, drawAffected: assignmentRowsToDelete.length > 0 };
+}
+
+// Elimina un account con tutti i suoi partecipanti e dati collegati.
+async function deleteAccountCascade(
+  target: { id: string; auth_user_id: string | null },
+  editionId: string,
+) {
+  const { data: targetParticipants, error: targetParticipantsError } =
+    await adminClient
+      .from("ss_participants")
+      .select("id")
+      .eq("account_id", target.id)
+      .eq("edition_id", editionId);
+
+  if (targetParticipantsError) {
+    return { error: "Errore nel recupero dei partecipanti.", drawAffected: false };
+  }
+
+  const removed = await removeParticipants(
+    (targetParticipants ?? []).map(item => item.id),
+    editionId,
+  );
+  if (removed.error) return removed;
+
+  // le selezioni fatte da questo utente rendono di nuovo disponibili i regali
+  const { error: ownSelectionsError } = await adminClient
+    .from("ss_gift_selections")
+    .delete()
+    .eq("selected_by_account_id", target.id);
+
+  if (ownSelectionsError) {
+    console.error("Delete account selections:", ownSelectionsError.message);
+    return { error: "Errore nella pulizia dei dati dell'utente.", drawAffected: removed.drawAffected };
+  }
+
+  const { error: deleteAccountError } = await adminClient
+    .from("ss_accounts")
+    .delete()
+    .eq("id", target.id);
+
+  if (deleteAccountError) {
+    console.error("Delete account:", deleteAccountError.message);
+    return { error: "Errore nell'eliminazione dell'account.", drawAffected: removed.drawAffected };
+  }
+
+  if (target.auth_user_id) {
+    const { error: deleteAuthError } =
+      await adminClient.auth.admin.deleteUser(target.auth_user_id);
+    if (deleteAuthError) {
+      console.error("Delete auth user:", deleteAuthError.message);
+    }
+  }
+
+  return { error: null as string | null, drawAffected: removed.drawAffected };
+}
+
+async function isDrawDone(editionId: string) {
+  return (await loadAssignmentMap(editionId)).size > 0;
+}
+
+// true se il nome è già usato da un account o un partecipante dell'edizione
+async function nameInUse(editionId: string, name: string) {
+  const lower = name.toLocaleLowerCase("it");
+  const [{ data: accounts }, { data: participants }] = await Promise.all([
+    adminClient.from("ss_accounts").select("login_name").eq("edition_id", editionId),
+    adminClient.from("ss_participants").select("display_name").eq("edition_id", editionId),
+  ]);
+
+  return [
+    ...(accounts ?? []).map(item => item.login_name),
+    ...(participants ?? []).map(item => item.display_name),
+  ].some(existing => existing.toLocaleLowerCase("it") === lower);
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -557,6 +670,12 @@ Deno.serve(async (req: Request) => {
       ) {
         return response({
           error: "Il termine per le iscrizioni è scaduto.",
+        }, 403);
+      }
+
+      if (await isDrawDone(edition.id)) {
+        return response({
+          error: "L'estrazione è già stata fatta: le iscrizioni sono chiuse.",
         }, 403);
       }
 
@@ -1070,6 +1189,7 @@ Deno.serve(async (req: Request) => {
           .from("ss_participants")
           .select("id, display_name")
           .eq("edition_id", account.edition_id)
+          .eq("excluded_from_draw", false)
           .neq("account_id", account.id)
           .order("display_name");
 
@@ -1339,6 +1459,134 @@ Deno.serve(async (req: Request) => {
       return response({ success: true, message: "Selezione annullata." });
     }
 
+    // LA MIA FAMIGLIA: componenti dell'account e stato dell'estrazione
+    if (action === "my_family") {
+      const { data: members, error: membersError } = await adminClient
+        .from("ss_participants")
+        .select("id, display_name, participant_type")
+        .eq("account_id", account.id)
+        .eq("edition_id", account.edition_id)
+        .order("display_name");
+
+      if (membersError) {
+        console.error("My family lookup:", membersError.message);
+        return response({ error: "Errore nel recupero della famiglia" }, 500);
+      }
+
+      return response({
+        success: true,
+        role: account.role,
+        draw_done: await isDrawDone(account.edition_id),
+        members: members ?? [],
+      });
+    }
+
+    // AGGIUNTA DI UN FIGLIO (prima dell'estrazione)
+    if (action === "add_child") {
+      const childName = body.name;
+
+      if (!validText(childName) || childName.trim().length > 100) {
+        return response({ error: "Inserisci un nome valido per il figlio/a." }, 400);
+      }
+
+      if (await isDrawDone(account.edition_id)) {
+        return response({
+          error: "L'estrazione è già stata fatta: per aggiungere un figlio l'amministratore deve prima resettarla.",
+        }, 409);
+      }
+
+      const { count: childCount } = await adminClient
+        .from("ss_participants")
+        .select("id", { count: "exact", head: true })
+        .eq("account_id", account.id)
+        .eq("edition_id", account.edition_id)
+        .eq("participant_type", "minor");
+
+      if ((childCount ?? 0) >= 10) {
+        return response({ error: "Puoi inserire al massimo 10 figli." }, 400);
+      }
+
+      const normalized = childName.trim();
+
+      if (await nameInUse(account.edition_id, normalized)) {
+        return response({
+          error: `Il nome "${normalized}" è già utilizzato. Scegli un nome diverso.`,
+        }, 409);
+      }
+
+      const { error: addError } = await adminClient
+        .from("ss_participants")
+        .insert({
+          id: crypto.randomUUID(),
+          edition_id: account.edition_id,
+          account_id: account.id,
+          display_name: normalized,
+          participant_type: "minor",
+          must_reset_password: false,
+          created_at: new Date().toISOString(),
+        });
+
+      if (addError) {
+        console.error("Add child:", addError.message);
+        return response({ error: "Non è stato possibile aggiungere il figlio." }, 409);
+      }
+
+      return response({ success: true, message: `${normalized} è stato aggiunto.` });
+    }
+
+    // RIMOZIONE DI UN PROPRIO FIGLIO (prima dell'estrazione)
+    if (action === "remove_child") {
+      const participantId = body.participant_id;
+
+      if (!validText(participantId)) {
+        return response({ error: "Richiesta non valida." }, 400);
+      }
+
+      if (await isDrawDone(account.edition_id)) {
+        return response({
+          error: "L'estrazione è già stata fatta: per togliere un figlio l'amministratore deve prima resettarla.",
+        }, 409);
+      }
+
+      const { data: child, error: childError } = await adminClient
+        .from("ss_participants")
+        .select("id, display_name, participant_type")
+        .eq("id", participantId)
+        .eq("account_id", account.id)
+        .eq("edition_id", account.edition_id)
+        .maybeSingle();
+
+      if (childError || !child || child.participant_type !== "minor") {
+        return response({ error: "Puoi togliere solo i tuoi figli." }, 403);
+      }
+
+      const removed = await removeParticipants([child.id], account.edition_id);
+      if (removed.error) return response({ error: removed.error }, 500);
+
+      return response({ success: true, message: `${child.display_name} è stato tolto.` });
+    }
+
+    // AUTO-ELIMINAZIONE DEL PROPRIO ACCOUNT (non per l'amministratore)
+    if (action === "delete_my_account") {
+      if (account.role === "admin") {
+        return response({ error: "L'amministratore non può eliminare il proprio account." }, 403);
+      }
+
+      if (await isDrawDone(account.edition_id)) {
+        return response({
+          error: "L'estrazione è già stata fatta: chiedi all'amministratore di eliminare il tuo account.",
+        }, 409);
+      }
+
+      const deleted = await deleteAccountCascade(
+        { id: account.id, auth_user_id: user.id },
+        account.edition_id,
+      );
+      if (deleted.error) return response({ error: deleted.error }, 500);
+
+      return response({ success: true, message: "Il tuo account è stato eliminato." });
+    }
+
     // AZIONI RISERVATE ALL'AMMINISTRATORE
     if (typeof action === "string" && action.startsWith("admin_")) {
       if (account.role !== "admin") {
@@ -1358,7 +1606,7 @@ Deno.serve(async (req: Request) => {
         const { data: participants, error: participantsError } =
           await adminClient
             .from("ss_participants")
-            .select("id, account_id, display_name, participant_type")
+            .select("id, account_id, display_name, participant_type, excluded_from_draw")
             .eq("edition_id", account.edition_id)
             .order("display_name");
 
@@ -1385,6 +1633,7 @@ Deno.serve(async (req: Request) => {
                 id: p.id,
                 display_name: p.display_name,
                 participant_type: p.participant_type,
+                excluded_from_draw: p.excluded_from_draw === true,
               })),
           })),
         });
@@ -1392,6 +1641,10 @@ Deno.serve(async (req: Request) => {
 
       // AGGIUNTA MANUALE DI UN UTENTE
       if (action === "admin_create_user") {
+        if (await isDrawDone(account.edition_id)) {
+          return response({ error: "L'estrazione è già stata fatta: per aggiungere o togliere persone resetta prima l'estrazione." }, 409);
+        }
+
         const adultName = body.name;
         const children = body.children ?? [];
         const suppliedPassword = body.password;
@@ -1618,9 +1871,86 @@ Deno.serve(async (req: Request) => {
         return response({ success: true, message: "Wishlist salvata." });
       }
 
+      // ELIMINAZIONE DI UN SINGOLO FIGLIO (di qualsiasi utente)
+      if (action === "admin_delete_participant") {
+        const participantId = body.participant_id;
+
+        if (await isDrawDone(account.edition_id)) {
+          return response({ error: "L'estrazione è già stata fatta: per aggiungere o togliere persone resetta prima l'estrazione." }, 409);
+        }
+
+        if (!validText(participantId)) {
+          return response({ error: "Richiesta non valida." }, 400);
+        }
+
+        const { data: target, error: targetError } = await adminClient
+          .from("ss_participants")
+          .select("id, display_name, participant_type")
+          .eq("id", participantId)
+          .eq("edition_id", account.edition_id)
+          .maybeSingle();
+
+        if (targetError || !target) {
+          return response({ error: "Partecipante non trovato." }, 400);
+        }
+
+        if (target.participant_type !== "minor") {
+          return response({
+            error: "Si possono eliminare solo i figli. Per un adulto elimina l'intero utente.",
+          }, 400);
+        }
+
+        const removed = await removeParticipants([target.id], account.edition_id);
+        if (removed.error) return response({ error: removed.error }, 500);
+
+        return response({
+          success: true,
+          message: `${target.display_name} è stato eliminato.`,
+          draw_affected: removed.drawAffected,
+        });
+      }
+
+      // PARTECIPA / NON PARTECIPA ALL'ESTRAZIONE (es. animali di casa)
+      if (action === "admin_set_excluded") {
+        const participantId = body.participant_id;
+        const excluded = body.excluded;
+
+        if (!validText(participantId) || typeof excluded !== "boolean") {
+          return response({ error: "Richiesta non valida." }, 400);
+        }
+
+        if (await isDrawDone(account.edition_id)) {
+          return response({
+            error: "L'estrazione è già stata fatta: resettala prima di cambiare chi partecipa.",
+          }, 409);
+        }
+
+        const { data: updated, error: excludeError } = await adminClient
+          .from("ss_participants")
+          .update({ excluded_from_draw: excluded })
+          .eq("id", participantId)
+          .eq("edition_id", account.edition_id)
+          .select("id");
+
+        if (excludeError) {
+          console.error("Admin set excluded:", excludeError.message);
+          return response({ error: "Non è stato possibile aggiornare il partecipante." }, 500);
+        }
+
+        if (!updated?.length) {
+          return response({ error: "Partecipante non trovato." }, 400);
+        }
+
+        return response({ success: true });
+      }
+
       // ELIMINAZIONE DI UN UTENTE (con i suoi partecipanti e dati collegati)
       if (action === "admin_delete_user") {
         const targetId = body.account_id;
+
+        if (await isDrawDone(account.edition_id)) {
+          return response({ error: "L'estrazione è già stata fatta: per aggiungere o togliere persone resetta prima l'estrazione." }, 409);
+        }
 
         if (!validText(targetId)) {
           return response({ error: "Richiesta non valida." }, 400);
@@ -1643,89 +1973,16 @@ Deno.serve(async (req: Request) => {
           return response({ error: "Utente non trovato." }, 404);
         }
 
-        const { data: targetParticipants, error: targetParticipantsError } =
-          await adminClient
-            .from("ss_participants")
-            .select("id")
-            .eq("account_id", target.id)
-            .eq("edition_id", account.edition_id);
+        const deleted = await deleteAccountCascade(target, account.edition_id);
 
-        if (targetParticipantsError) {
-          return response({ error: "Errore nel recupero dei partecipanti." }, 500);
-        }
-
-        const ids = (targetParticipants ?? []).map(item => item.id);
-
-        let drawAffected = false;
-
-        if (ids.length) {
-          // righe dell'estrazione da togliere: quelle di chi viene eliminato
-          // e quelle di chi avrebbe dovuto fargli il regalo
-          const assignmentMap = await loadAssignmentMap(account.edition_id);
-          const idSet = new Set(ids);
-          const assignmentRowsToDelete = [...assignmentMap.entries()]
-            .filter(([giver, receiver]) => idSet.has(giver) || idSet.has(receiver))
-            .map(([giver]) => giver);
-          drawAffected = assignmentRowsToDelete.length > 0;
-
-          const cleanup = [
-            adminClient.from("ss_wishlists").delete().in("participant_id", ids),
-            adminClient.from("ss_gift_selections").delete().in("owner_participant_id", ids),
-            adminClient.from("ss_assignments").delete().in("participant_id", [...ids, ...assignmentRowsToDelete]),
-          ];
-
-          for (const result of await Promise.all(cleanup)) {
-            if (result.error) {
-              console.error("Admin delete cleanup:", result.error.message);
-              return response({ error: "Errore nella pulizia dei dati dell'utente." }, 500);
-            }
-          }
-        }
-
-        // le selezioni fatte da questo utente rendono di nuovo disponibili i regali
-        const { error: ownSelectionsError } = await adminClient
-          .from("ss_gift_selections")
-          .delete()
-          .eq("selected_by_account_id", target.id);
-
-        if (ownSelectionsError) {
-          console.error("Admin delete selections:", ownSelectionsError.message);
-          return response({ error: "Errore nella pulizia dei dati dell'utente." }, 500);
-        }
-
-        const { error: deleteParticipantsError } = await adminClient
-          .from("ss_participants")
-          .delete()
-          .eq("account_id", target.id)
-          .eq("edition_id", account.edition_id);
-
-        if (deleteParticipantsError) {
-          console.error("Admin delete participants:", deleteParticipantsError.message);
-          return response({ error: "Errore nell'eliminazione dei partecipanti." }, 500);
-        }
-
-        const { error: deleteAccountError } = await adminClient
-          .from("ss_accounts")
-          .delete()
-          .eq("id", target.id);
-
-        if (deleteAccountError) {
-          console.error("Admin delete account:", deleteAccountError.message);
-          return response({ error: "Errore nell'eliminazione dell'account." }, 500);
-        }
-
-        if (target.auth_user_id) {
-          const { error: deleteAuthError } =
-            await adminClient.auth.admin.deleteUser(target.auth_user_id);
-          if (deleteAuthError) {
-            console.error("Admin delete auth user:", deleteAuthError.message);
-          }
+        if (deleted.error) {
+          return response({ error: deleted.error }, 500);
         }
 
         return response({
           success: true,
           message: `Utente "${target.login_name}" eliminato.`,
-          draw_affected: drawAffected,
+          draw_affected: deleted.drawAffected,
         });
       }
 
@@ -1772,14 +2029,16 @@ Deno.serve(async (req: Request) => {
       if (action === "admin_draw") {
         const { data: everyone, error: everyoneError } = await adminClient
           .from("ss_participants")
-          .select("id, account_id")
+          .select("id, account_id, excluded_from_draw")
           .eq("edition_id", account.edition_id);
 
         if (everyoneError) {
           return response({ error: "Errore nel recupero partecipanti." }, 500);
         }
 
-        const people = everyone ?? [];
+        const allIds = (everyone ?? []).map(person => person.id);
+        // chi è escluso (es. gli animali di casa) non pesca e non viene pescato
+        const people = (everyone ?? []).filter(person => !person.excluded_from_draw);
 
         if (people.length < 2) {
           return response({
@@ -1839,7 +2098,7 @@ Deno.serve(async (req: Request) => {
         const { error: clearAssignmentsError } = await adminClient
           .from("ss_assignments")
           .delete()
-          .in("participant_id", people.map(person => person.id));
+          .in("participant_id", allIds);
 
         if (clearSelectionsError || clearAssignmentsError) {
           console.error(
