@@ -299,3 +299,39 @@ a.button-link {
   width: 12px;
   height: 12px;
 }
+
+/* Countdown in alto nell'intestazione: non occupa spazio */
+.hero { position: relative; }
+.countdown {
+  position: absolute;
+  top: 14px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* Finestra di rivelazione */
+.reveal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(10, 30, 24, 0.75);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.reveal-box {
+  background: white; border-radius: 16px; padding: 20px;
+  width: 100%; max-width: 420px; max-height: 85vh; overflow-y: auto;
+}
+.reveal-box h2 { margin-top: 0; text-align: center; }
+.reveal-pair {
+  padding: 8px 0; border-bottom: 1px solid #e3e9df; font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.reveal-pair.mine { font-weight: bold; color: var(--green); }
+.reveal-box .check-label { margin-top: 14px; }
+
+.field-hint { font-size: 13px; color: #718077; margin: 4px 0 12px; }

@@ -23,6 +23,8 @@
         <a class="nav-link primary-link" href="partecipanti.html">🎅 Partecipanti e regali</a>
         <a class="nav-link" href="wishlist.html">🎁 La mia wishlist</a>
         <a class="nav-link" href="famiglia.html">👨‍👩‍👧 La mia famiglia</a>
+        <a class="nav-link" href="password.html">🔑 Modifica password</a>
+        <a class="nav-link" id="revealLink" href="#" hidden>🎅 Rivelazione dei Secret Santa</a>
         <a class="nav-link" href="secret-santa.html">🤫 Il nostro Secret Santa</a>
         <a class="nav-link" id="adminLink" href="admin.html" hidden>⚙️ Pannello amministratore<span class="dot" id="adminDot" title="Richieste di reset password" hidden></span></a>
       </div>
@@ -35,9 +37,74 @@
 
   <footer>✨ Un regalo, una sorpresa, un Natale speciale ✨</footer>
 
-  <script src="common.js?v=1"></script>
+  <script src="common.js?v=2"></script>
   <script>
     document.getElementById("logoutButton").addEventListener("click", ssLogout);
+
+    // --- Rivelazione dei Secret Santa (dal 25 dicembre, ore 00:00) ---
+    const REVEAL_AT = Date.parse("2026-12-25T00:00:00+01:00");
+
+    function storageGet(storage, key) {
+      try { return storage.getItem(key); } catch { return null; }
+    }
+    function storageSet(storage, key, value) {
+      try { storage.setItem(key, value); } catch { /* facoltativo */ }
+    }
+
+    function showReveal(data, myNames) {
+      const overlay = document.createElement("div");
+      overlay.className = "reveal-overlay";
+      const box = document.createElement("div");
+      box.className = "reveal-box";
+
+      const title = document.createElement("h2");
+      title.textContent = "🎅 Ecco i Secret Santa!";
+      box.appendChild(title);
+
+      data.pairs.forEach(pair => {
+        const row = document.createElement("div");
+        row.className = "reveal-pair" + (myNames.has(pair.giver) || myNames.has(pair.receiver) ? " mine" : "");
+        row.textContent = "🎅 " + pair.giver + "  →  🎁 " + pair.receiver;
+        box.appendChild(row);
+      });
+
+      const label = document.createElement("label");
+      label.className = "check-label";
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      label.append(check, " Non mostrare più");
+      box.appendChild(label);
+
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "primary";
+      close.textContent = "Chiudi";
+      close.addEventListener("click", () => {
+        if (check.checked) storageSet(localStorage, "ss_reveal_hide_" + data.account_id, "1");
+        storageSet(sessionStorage, "ss_reveal_closed", "1");
+        overlay.remove();
+      });
+      box.appendChild(close);
+
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+    }
+
+    async function maybeReveal(participants) {
+      if (Date.now() < REVEAL_AT) return;
+      try {
+        const data = await ssApi("reveal_secret_santas");
+        if (!data.pairs.length) return;
+        const myNames = new Set(participants.map(p => p.display_name));
+        const link = document.getElementById("revealLink");
+        link.hidden = false;
+        link.addEventListener("click", event => { event.preventDefault(); showReveal(data, myNames); });
+
+        const hidden = storageGet(localStorage, "ss_reveal_hide_" + data.account_id) === "1";
+        const closed = storageGet(sessionStorage, "ss_reveal_closed") === "1";
+        if (!hidden && !closed) showReveal(data, myNames);
+      } catch { /* la rivelazione non è disponibile */ }
+    }
 
     async function init() {
       if (!ssToken()) {
@@ -52,6 +119,8 @@
         document.getElementById("participantsInfo").textContent =
           "Partecipanti associati a questo account: " +
           data.participants.map(p => p.display_name).join(", ");
+
+        maybeReveal(data.participants);
 
         if (data.account.role === "admin") {
           document.getElementById("adminLink").hidden = false;
@@ -70,5 +139,6 @@
 
     init();
   </script>
+  <script src="countdown.js?v=1" defer></script>
 </body>
 </html>

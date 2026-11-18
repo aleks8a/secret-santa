@@ -39,6 +39,19 @@ function validText(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+// Nome utente: solo lettere, numeri, trattino e trattino basso, max 20, senza spazi.
+const LOGIN_NAME_PATTERN = /^[A-Za-z0-9_-]{1,20}$/;
+const LOGIN_NAME_ERROR =
+  "Il nome utente può contenere solo lettere, numeri, trattino (-) e trattino basso (_), senza spazi, massimo 20 caratteri.";
+
+// Rivelazione dei Secret Santa: 25 dicembre 2026, ore 00:00 (Italia)
+const REVEAL_AT = new Date("2026-12-25T00:00:00+01:00");
+
+// ilike tratta % e _ come caratteri jolly: li neutralizza per un confronto esatto
+function escapeLike(value: string) {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
 // Valida una lista di regali (usata sia dall'utente sia dall'admin).
 // Restituisce un messaggio di errore, oppure null se la lista è valida.
 function validateGifts(gifts: unknown): string | null {
@@ -460,6 +473,27 @@ async function createFamilyAccount(options: {
   return { accountId, participants: newParticipants };
 }
 
+// Registro delle attività (visibile all'admin). Non deve mai bloccare l'azione
+// principale: se la scrittura fallisce si registra solo l'errore.
+async function logActivity(
+  editionId: string,
+  event: string,
+  accountName: string | null,
+  details?: string,
+) {
+  try {
+    const { error } = await adminClient.from("ss_activity_log").insert({
+      edition_id: editionId,
+      event,
+      account_name: accountName,
+      details: details ?? null,
+    });
+    if (error) console.error("Activity log:", error.message);
+  } catch (error) {
+    console.error("Activity log:", error);
+  }
+}
+
 // Toglie wishlist, selezioni e assegnazioni dei partecipanti indicati
 // (e le assegnazioni di chi avrebbe dovuto fargli il regalo), poi li elimina.
 async function removeParticipants(ids: string[], editionId: string) {
@@ -614,6 +648,11 @@ Deno.serve(async (req: Request) => {
       }
 
       const normalizedAdultName = adultName.trim();
+
+      if (!LOGIN_NAME_PATTERN.test(normalizedAdultName)) {
+        return response({ error: LOGIN_NAME_ERROR }, 400);
+      }
+
       const childNames: string[] = [];
 
       for (const child of children) {
@@ -806,6 +845,13 @@ Deno.serve(async (req: Request) => {
         }, 409);
       }
 
+      await logActivity(
+        edition.id,
+        "register",
+        normalizedAdultName,
+        childNames.length ? `con ${childNames.length} figli` : undefined,
+      );
+
       return response({
         success: true,
         message: "Registrazione completata. Ora puoi accedere.",
@@ -827,17 +873,15 @@ Deno.serve(async (req: Request) => {
 
       if (
         !validText(loginName) ||
-        loginName.length > 100 ||
-        loginName.includes("%") ||
-        loginName.includes("_")
+        loginName.length > 100
       ) {
         return response({ error: "Inserisci il tuo nome utente." }, 400);
       }
 
       const { data: target } = await adminClient
         .from("ss_accounts")
-        .select("id, role, password_reset_requested_at")
-        .ilike("login_name", loginName.trim())
+        .select("id, edition_id, login_name, role, password_reset_requested_at")
+        .ilike("login_name", escapeLike(loginName.trim()))
         .maybeSingle();
 
       // l'admin non può chiedere il reset a sé stesso
@@ -851,12 +895,32 @@ Deno.serve(async (req: Request) => {
           console.error("Password reset request:", requestError.message);
           return response({ error: "Non è stato possibile inviare la richiesta." }, 500);
         }
+
+        await logActivity(target.edition_id, "reset_request", target.login_name);
       }
 
       return response({
         success: true,
         message:
           "Richiesta inviata. Se il nome utente è corretto, l'amministratore è stato avvisato e ti darà una password temporanea.",
+      });
+    }
+
+    // INFO PUBBLICHE PER IL COUNTDOWN (visibili anche prima dell'accesso)
+    if (action === "public_info") {
+      const { data: edition } = await adminClient
+        .from("ss_editions")
+        .select("id, draw_date, registration_deadline")
+        .eq("year", 2026)
+        .maybeSingle();
+
+      if (!edition) return response({ error: "Edizione non disponibile." }, 500);
+
+      return response({
+        success: true,
+        draw_done: await isDrawDone(edition.id),
+        draw_date: edition.draw_date ?? edition.registration_deadline ?? null,
+        reveal_at: REVEAL_AT.toISOString(),
       });
     }
 
@@ -868,9 +932,7 @@ Deno.serve(async (req: Request) => {
       if (
         !validText(loginName) ||
         !validText(password) ||
-        loginName.length > 100 ||
-        loginName.includes("%") ||
-        loginName.includes("_")
+        loginName.length > 100
       ) {
         return response({ error: "Credenziali non valide" }, 400);
       }
@@ -879,7 +941,7 @@ Deno.serve(async (req: Request) => {
         await adminClient
           .from("ss_accounts")
           .select("id, auth_user_id")
-          .ilike("login_name", loginName.trim())
+          .ilike("login_name", escapeLike(loginName.trim()))
           .maybeSingle();
 
       if (
@@ -928,7 +990,7 @@ Deno.serve(async (req: Request) => {
       const { data: accountData, error: accountDataError } =
         await adminClient
           .from("ss_accounts")
-          .select("id, login_name, role, must_reset_password")
+          .select("id, edition_id, login_name, role, must_reset_password")
           .eq("id", account.id)
           .single();
 
@@ -942,6 +1004,8 @@ Deno.serve(async (req: Request) => {
         .update({ password_reset_requested_at: null })
         .eq("id", account.id)
         .not("password_reset_requested_at", "is", null);
+
+      await logActivity(accountData.edition_id, "login", accountData.login_name);
 
       return response({
         success: true,
@@ -1048,11 +1112,19 @@ Deno.serve(async (req: Request) => {
         }, 500);
       }
 
+      await logActivity(account.edition_id, "password_change", account.login_name);
+
       return response({
         success: true,
         message: "Password cambiata correttamente",
         must_reset_password: false,
       });
+    }
+
+    // USCITA (solo per il registro attività)
+    if (action === "logout") {
+      await logActivity(account.edition_id, "logout", account.login_name);
+      return response({ success: true });
     }
 
     // BLOCCO OBBLIGATORIO FINO AL CAMBIO PASSWORD
@@ -1459,11 +1531,123 @@ Deno.serve(async (req: Request) => {
       return response({ success: true, message: "Selezione annullata." });
     }
 
+    // MODIFICA PASSWORD (chiede la password attuale)
+    if (action === "change_my_password") {
+      const currentPassword = body.current_password;
+      const newPassword = body.new_password;
+
+      if (
+        !validText(currentPassword) ||
+        !validText(newPassword) ||
+        newPassword.length < 6 ||
+        newPassword.length > 128
+      ) {
+        return response({
+          error: "La nuova password deve avere almeno 6 caratteri.",
+        }, 400);
+      }
+
+      const { data: authUser } =
+        await adminClient.auth.admin.getUserById(user.id);
+
+      if (!authUser?.user?.email) {
+        return response({ error: "Errore nel cambio password." }, 500);
+      }
+
+      const checkClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { error: checkError } = await checkClient.auth.signInWithPassword({
+        email: authUser.user.email,
+        password: currentPassword,
+      });
+
+      if (checkError) {
+        return response({ error: "La password attuale non è corretta." }, 403);
+      }
+
+      const { error: updateError } = await adminClient.auth.admin
+        .updateUserById(user.id, { password: newPassword });
+
+      if (updateError) {
+        console.error("Password change:", updateError.message);
+        return response({ error: "Errore nel cambio password." }, 500);
+      }
+
+      await adminClient
+        .from("ss_accounts")
+        .update({ password_reset_requested_at: null })
+        .eq("id", account.id);
+
+      await logActivity(account.edition_id, "password_change", account.login_name);
+
+      return response({ success: true, message: "Password modificata." });
+    }
+
+    // RIVELAZIONE: chi era il Secret Santa di chi (dal 25 dicembre, ore 00:00)
+    if (action === "reveal_secret_santas") {
+      if (Date.now() < REVEAL_AT.getTime()) {
+        return response({ error: "La rivelazione non è ancora disponibile." }, 403);
+      }
+
+      const assignmentMap = await loadAssignmentMap(account.edition_id);
+      const { data: people } = await adminClient
+        .from("ss_participants")
+        .select("id, display_name")
+        .eq("edition_id", account.edition_id);
+
+      const nameById = new Map((people ?? []).map(p => [p.id, p.display_name]));
+      const pairs = [...assignmentMap.entries()]
+        .map(([giver, receiver]) => ({
+          giver: nameById.get(giver) ?? "?",
+          receiver: nameById.get(receiver) ?? "?",
+        }))
+        .sort((a, b) => a.giver.localeCompare(b.giver, "it"));
+
+      return response({ success: true, account_id: account.id, pairs });
+    }
+
+    // UN GENITORE INCLUDE/ESCLUDE UN PROPRIO FIGLIO DAL SORTEGGIO
+    if (action === "set_child_excluded") {
+      const participantId = body.participant_id;
+      const excluded = body.excluded;
+
+      if (!validText(participantId) || typeof excluded !== "boolean") {
+        return response({ error: "Richiesta non valida." }, 400);
+      }
+
+      if (await isDrawDone(account.edition_id)) {
+        return response({
+          error: "L'estrazione è già stata fatta: per cambiare chi partecipa l'amministratore deve prima resettarla.",
+        }, 409);
+      }
+
+      const { data: updated, error: excludeError } = await adminClient
+        .from("ss_participants")
+        .update({ excluded_from_draw: excluded })
+        .eq("id", participantId)
+        .eq("account_id", account.id)
+        .eq("edition_id", account.edition_id)
+        .eq("participant_type", "minor")
+        .select("id");
+
+      if (excludeError) {
+        console.error("Set child excluded:", excludeError.message);
+        return response({ error: "Non è stato possibile aggiornare il figlio." }, 500);
+      }
+
+      if (!updated?.length) {
+        return response({ error: "Puoi modificare solo i tuoi figli." }, 403);
+      }
+
+      return response({ success: true });
+    }
+
     // LA MIA FAMIGLIA: componenti dell'account e stato dell'estrazione
     if (action === "my_family") {
       const { data: members, error: membersError } = await adminClient
         .from("ss_participants")
-        .select("id, display_name, participant_type")
+        .select("id, display_name, participant_type, excluded_from_draw")
         .eq("account_id", account.id)
         .eq("edition_id", account.edition_id)
         .order("display_name");
@@ -1531,6 +1715,8 @@ Deno.serve(async (req: Request) => {
         return response({ error: "Non è stato possibile aggiungere il figlio." }, 409);
       }
 
+      await logActivity(account.edition_id, "child_add", account.login_name, normalized);
+
       return response({ success: true, message: `${normalized} è stato aggiunto.` });
     }
 
@@ -1563,6 +1749,8 @@ Deno.serve(async (req: Request) => {
       const removed = await removeParticipants([child.id], account.edition_id);
       if (removed.error) return response({ error: removed.error }, 500);
 
+      await logActivity(account.edition_id, "child_remove", account.login_name, child.display_name);
+
       return response({ success: true, message: `${child.display_name} è stato tolto.` });
     }
 
@@ -1583,6 +1771,8 @@ Deno.serve(async (req: Request) => {
         account.edition_id,
       );
       if (deleted.error) return response({ error: deleted.error }, 500);
+
+      await logActivity(account.edition_id, "delete", account.login_name, "account eliminato dall'utente");
 
       return response({ success: true, message: "Il tuo account è stato eliminato." });
     }
@@ -1613,6 +1803,12 @@ Deno.serve(async (req: Request) => {
         const assignmentsCount =
           (await loadAssignmentMap(account.edition_id)).size;
 
+        const { data: editionRow } = await adminClient
+          .from("ss_editions")
+          .select("draw_date, registration_deadline")
+          .eq("id", account.edition_id)
+          .maybeSingle();
+
         if (accountsError || participantsError) {
           console.error(
             "Admin list users:",
@@ -1625,6 +1821,8 @@ Deno.serve(async (req: Request) => {
           success: true,
           current_account_id: account.id,
           draw_done: (assignmentsCount ?? 0) > 0,
+          draw_date: editionRow?.draw_date ?? null,
+          fallback_draw_date: editionRow?.registration_deadline ?? null,
           users: (accounts ?? []).map(item => ({
             ...item,
             participants: (participants ?? [])
@@ -1662,6 +1860,10 @@ Deno.serve(async (req: Request) => {
           }, 400);
         }
 
+        if (!LOGIN_NAME_PATTERN.test(adultName.trim())) {
+          return response({ error: LOGIN_NAME_ERROR }, 400);
+        }
+
         const childNames: string[] = [];
         for (const child of children) {
           if (!validText(child) || child.trim().length > 100) {
@@ -1687,6 +1889,13 @@ Deno.serve(async (req: Request) => {
         if ("error" in created) {
           return response({ error: created.error }, created.status);
         }
+
+        await logActivity(
+          account.edition_id,
+          "admin_create",
+          adultName.trim(),
+          `creato da ${account.login_name}`,
+        );
 
         return response({
           success: true,
@@ -1757,6 +1966,13 @@ Deno.serve(async (req: Request) => {
             error: "Password cambiata, ma l'obbligo di cambio al primo accesso non è stato impostato.",
           }, 500);
         }
+
+        await logActivity(
+          account.edition_id,
+          "password_reset",
+          target.login_name,
+          `reset da ${account.login_name}`,
+        );
 
         return response({
           success: true,
@@ -1903,6 +2119,13 @@ Deno.serve(async (req: Request) => {
         const removed = await removeParticipants([target.id], account.edition_id);
         if (removed.error) return response({ error: removed.error }, 500);
 
+        await logActivity(
+          account.edition_id,
+          "child_remove",
+          null,
+          `${target.display_name} eliminato da ${account.login_name}`,
+        );
+
         return response({
           success: true,
           message: `${target.display_name} è stato eliminato.`,
@@ -1979,6 +2202,13 @@ Deno.serve(async (req: Request) => {
           return response({ error: deleted.error }, 500);
         }
 
+        await logActivity(
+          account.edition_id,
+          "delete",
+          target.login_name,
+          `eliminato da ${account.login_name}`,
+        );
+
         return response({
           success: true,
           message: `Utente "${target.login_name}" eliminato.`,
@@ -2019,10 +2249,62 @@ Deno.serve(async (req: Request) => {
           return response({ error: "Non è stato possibile resettare l'estrazione." }, 500);
         }
 
+        await logActivity(account.edition_id, "draw_reset", account.login_name);
+
         return response({
           success: true,
           message: "Estrazione resettata: assegnazioni e regali scelti sono stati cancellati.",
         });
+      }
+
+      // REGISTRO DELLE ATTIVITÀ (le più recenti per prime)
+      if (action === "admin_activity_log") {
+        const requested = Number(body.limit);
+        const limit = Number.isInteger(requested) && requested > 0
+          ? Math.min(requested, 500)
+          : 200;
+
+        const { data: entries, error: logError } = await adminClient
+          .from("ss_activity_log")
+          .select("id, created_at, event, account_name, details")
+          .eq("edition_id", account.edition_id)
+          .order("created_at", { ascending: false })
+          .limit(limit);
+
+        if (logError) {
+          console.error("Admin activity log:", logError.message);
+          return response({
+            error: "Non è stato possibile leggere il registro. Hai eseguito la migrazione SQL?",
+          }, 500);
+        }
+
+        return response({ success: true, entries: entries ?? [] });
+      }
+
+      // DATA DELL'ESTRAZIONE (per il countdown)
+      if (action === "admin_set_draw_date") {
+        const raw = body.draw_date;
+        let value: string | null = null;
+
+        if (raw !== null && raw !== "") {
+          const parsed = typeof raw === "string" ? new Date(raw) : null;
+          if (!parsed || Number.isNaN(parsed.getTime())) {
+            return response({ error: "Data non valida." }, 400);
+          }
+          value = parsed.toISOString();
+        }
+
+        const { error: dateError } = await adminClient
+          .from("ss_editions")
+          .update({ draw_date: value })
+          .eq("id", account.edition_id);
+
+        if (dateError) {
+          console.error("Admin set draw date:", dateError.message);
+          return response({ error: "Non è stato possibile salvare la data." }, 500);
+        }
+
+        return response({ success: true, message: "Data dell'estrazione salvata." });
       }
 
       // ESTRAZIONE DEL SECRET SANTA
@@ -2116,6 +2398,13 @@ Deno.serve(async (req: Request) => {
           console.error("Admin draw insert:", insertAssignmentsError.message);
           return response({ error: "Errore nel salvataggio dell'estrazione." }, 500);
         }
+
+        await logActivity(
+          account.edition_id,
+          "draw",
+          account.login_name,
+          `${rows.length} partecipanti`,
+        );
 
         return response({
           success: true,

@@ -29,8 +29,11 @@
           <input
             id="loginName"
             type="text"
-            placeholder="Es. Checco Zalone"
+            placeholder="Es. Checco"
             autocomplete="username"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
             required
           >
 
@@ -61,14 +64,24 @@
         <h2>Crea il tuo account</h2>
 
         <form id="registrationForm">
-          <label for="name">Nome</label>
+          <label for="name">Nome utente</label>
           <input
             id="name"
             type="text"
-            placeholder="Es. Checco Zalone"
-            autocomplete="name"
+            placeholder="Es. Checco"
+            autocomplete="username"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            maxlength="20"
+            pattern="[A-Za-z0-9_\-]{1,20}"
+            title="Solo lettere, numeri, trattino (-) e trattino basso (_), senza spazi, massimo 20 caratteri"
             required
           >
+          <p class="field-hint">
+            Un nome o un nickname senza spazi (max 20 caratteri): solo lettere,
+            numeri, trattino (-) e trattino basso (_).
+          </p>
 
           <label for="password">Scegli una password</label>
           <input
@@ -125,7 +138,8 @@
     ✨ Un regalo, una sorpresa, un Natale speciale ✨
   </footer>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
+  <script src="countdown.js?v=1" defer></script>
 </body>
 </html>
 

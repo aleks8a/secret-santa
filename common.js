@@ -36,7 +36,25 @@ async function ssApi(action, data = {}) {
 
 // Esce dall'account e torna alla pagina di accesso
 function ssLogout() {
+  const token = ssToken();
   sessionStorage.removeItem(SS_TOKEN_KEY);
+  sessionStorage.removeItem("ss_reveal_closed");
+
+  // segnala l'uscita al registro attività (facoltativo, non blocca l'uscita)
+  if (token) {
+    try {
+      fetch(SS_FUNCTION_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SS_ANON_KEY,
+          "Authorization": "Bearer " + token
+        },
+        body: JSON.stringify({ action: "logout" }),
+        keepalive: true
+      }).catch(() => {});
+    } catch { /* ignorato */ }
+  }
   window.location.href = "index.html";
 }
 

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15392e">
+  <title>Registro attività – Secret Santa 2026</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .log-entry {
+      display: flex; gap: 10px; padding: 10px 0;
+      border-bottom: 1px solid #e3e9df; font-size: 14px;
+    }
+    .log-entry .when { flex: 0 0 92px; color: #718077; font-size: 12px; line-height: 1.4; }
+    .log-entry .what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .log-entry .who { font-weight: bold; color: var(--green); }
+    .log-entry .details { color: #718077; font-size: 13px; }
+    .log-tools { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+    .log-tools select { margin: 0; flex: 1; }
+    .log-tools button { margin: 0; width: auto; padding: 10px 14px; }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">🎄 SECRET SANTA 🎄</div>
+    <p>La magia del Natale comincia qui</p>
+    <span class="status">AMMINISTRATORE</span>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <p><a href="admin.html">← Impostazioni</a></p>
+      <h1>Registro attività 📜</h1>
+
+      <div class="log-tools">
+        <select id="filter" aria-label="Filtra per tipo">
+          <option value="">Tutte le attività</option>
+          <option value="register,admin_create">Iscrizioni</option>
+          <option value="delete,child_remove">Eliminazioni</option>
+          <option value="password_change,password_reset,reset_request">Password</option>
+          <option value="login,logout">Accessi e uscite</option>
+          <option value="draw,draw_reset">Estrazione</option>
+        </select>
+        <button type="button" id="refresh" class="secondary">Aggiorna</button>
+      </div>
+
+      <p id="message" aria-live="polite">Caricamento...</p>
+      <div id="logList"></div>
+    </section>
+  </main>
+
+  <footer>✨ Un regalo, una sorpresa, un Natale speciale ✨</footer>
+
+  <script src="common.js?v=2"></script>
+  <script>
+    const EVENTS = {
+      register: "📝 Iscritto",
+      admin_create: "➕ Utente creato dall'admin",
+      delete: "🗑️ Eliminato",
+      child_add: "👶 Figlio aggiunto",
+      child_remove: "👶 Figlio tolto",
+      password_change: "🔑 Password cambiata",
+      password_reset: "🔄 Password resettata",
+      reset_request: "🔴 Password dimenticata",
+      login: "✅ Accesso",
+      logout: "🚪 Uscita",
+      draw: "🎅 Estrazione fatta",
+      draw_reset: "♻️ Estrazione resettata"
+    };
+
+    const message = document.getElementById("message");
+    const logList = document.getElementById("logList");
+    const filter = document.getElementById("filter");
+    let entries = [];
+
+    function formatDate(iso) {
+      return new Date(iso).toLocaleString("it-IT", {
+        timeZone: "Europe/Rome",
+        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit"
+      });
+    }
+
+    function render() {
+      logList.replaceChildren();
+      const allowed = filter.value ? filter.value.split(",") : null;
+      const shown = entries.filter(e => !allowed || allowed.includes(e.event));
+
+      message.textContent = shown.length
+        ? shown.length + " attività (le più recenti per prime)."
+        : "Nessuna attività registrata.";
+
+      shown.forEach(entry => {
+        const row = document.createElement("div");
+        row.className = "log-entry";
+
+        const when = document.createElement("div");
+        when.className = "when";
+        when.textContent = formatDate(entry.created_at);
+
+        const what = document.createElement("div");
+        what.className = "what";
+        const label = document.createElement("div");
+        label.textContent = EVENTS[entry.event] || entry.event;
+        what.appendChild(label);
+
+        if (entry.account_name) {
+          const who = document.createElement("span");
+          who.className = "who";
+          who.textContent = entry.account_name;
+          what.appendChild(who);
+        }
+        if (entry.details) {
+          const details = document.createElement("span");
+          details.className = "details";
+          details.textContent = (entry.account_name ? " – " : "") + entry.details;
+          what.appendChild(details);
+        }
+
+        row.append(when, what);
+        logList.appendChild(row);
+      });
+    }
+
+    async function load() {
+      message.textContent = "Caricamento...";
+      try {
+        const data = await ssApi("admin_activity_log", { limit: 500 });
+        entries = data.entries;
+        render();
+      } catch (error) {
+        if (ssSessionExpired(error)) {
+          sessionStorage.removeItem(SS_TOKEN_KEY);
+          window.location.replace("index.html");
+          return;
+        }
+        if (error.status === 403) {
+          window.location.replace("home.html");
+          return;
+        }
+        message.textContent = error.message;
+      }
+    }
+
+    filter.addEventListener("change", render);
+    document.getElementById("refresh").addEventListener("click", load);
+
+    if (!ssToken()) window.location.replace("index.html");
+    else load();
+  </script>
+  <script src="countdown.js?v=1" defer></script>
+</body>
+</html>

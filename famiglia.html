@@ -31,7 +31,7 @@
       <div class="top-actions"><a href="home.html">← La mia pagina</a></div>
 
       <h1>La mia famiglia 👨‍👩‍👧</h1>
-      <p class="intro">Qui puoi aggiungere o togliere i tuoi figli.</p>
+      <p class="intro">Qui puoi aggiungere o togliere i tuoi figli e scegliere se partecipano al sorteggio (se tolgono la spunta non pescano nessuno e nessuno li pesca).</p>
 
       <div id="drawNotice" class="notice" hidden>
         L'estrazione è già stata fatta, quindi non si può più cambiare la
@@ -63,7 +63,7 @@
 
   <footer>✨ Un regalo, una sorpresa, un Natale speciale ✨</footer>
 
-  <script src="common.js?v=1"></script>
+  <script src="common.js?v=2"></script>
   <script>
     const message = document.getElementById("message");
     const memberList = document.getElementById("memberList");
@@ -96,6 +96,17 @@
         row.appendChild(info);
 
         if (member.participant_type === "minor") {
+          const toggle = document.createElement("label");
+          toggle.className = "check-label";
+          toggle.style.margin = "0";
+          const box = document.createElement("input");
+          box.type = "checkbox";
+          box.checked = !member.excluded_from_draw;
+          box.disabled = data.draw_done;
+          box.addEventListener("change", () => setExcluded(member, !box.checked, box));
+          toggle.append(box, " Partecipa al sorteggio");
+          info.appendChild(toggle);
+
           const remove = document.createElement("button");
           remove.type = "button";
           remove.className = "danger";
@@ -120,6 +131,20 @@
         message.textContent = notice || "";
       } catch (error) {
         fail(error);
+      }
+    }
+
+    async function setExcluded(member, excluded, box) {
+      box.disabled = true;
+      try {
+        await ssApi("set_child_excluded", { participant_id: member.id, excluded });
+        await load(member.display_name + (excluded
+          ? " non partecipa al sorteggio."
+          : " partecipa al sorteggio."));
+      } catch (error) {
+        message.textContent = error.message;
+        box.checked = !excluded;
+        box.disabled = false;
       }
     }
 
@@ -170,5 +195,6 @@
       await load();
     })();
   </script>
+  <script src="countdown.js?v=1" defer></script>
 </body>
 </html>

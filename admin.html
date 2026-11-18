@@ -77,6 +77,7 @@
       </div>
 
       <h1>Impostazioni ⚙️</h1>
+      <p><a href="admin-log.html">📜 Registro delle attività</a></p>
       <p id="message" aria-live="polite">Caricamento...</p>
 
       <div id="tempBox" class="temp-box" hidden></div>
@@ -92,6 +93,13 @@
 
       <h2>Estrazione Secret Santa 🎅</h2>
       <p class="intro" id="drawStatus"></p>
+      <label for="drawDate">Data dell'estrazione (per il countdown)</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="drawDate" type="datetime-local" style="margin:0;flex:1">
+        <button type="button" id="saveDrawDate" class="secondary" style="margin:0;width:auto">Salva</button>
+      </div>
+      <p class="field-hint" id="drawDateHint"></p>
+
       <details class="participants-box" id="participantsBox">
         <summary>👥 Chi partecipa all'estrazione</summary>
         <p class="intro" id="participantsHint">
@@ -114,8 +122,12 @@
       <details class="add-user" id="addUserDetails">
         <summary>＋ Nuovo utente</summary>
         <form id="addUserForm">
-          <label for="newName">Nome e cognome</label>
-          <input id="newName" type="text" maxlength="100" placeholder="Es. Mario Rossi" required>
+          <label for="newName">Nome utente / nickname</label>
+          <input id="newName" type="text" maxlength="20" placeholder="Es. Mario"
+            autocapitalize="none" autocorrect="off" spellcheck="false"
+            pattern="[A-Za-z0-9_\-]{1,20}"
+            title="Solo lettere, numeri, trattino (-) e trattino basso (_), senza spazi, massimo 20 caratteri" required>
+          <p class="field-hint">Senza spazi, max 20 caratteri: lettere, numeri, - e _.</p>
 
           <label for="newPassword">Password temporanea (facoltativa)</label>
           <input id="newPassword" type="text" minlength="6" maxlength="128"
@@ -135,7 +147,7 @@
 
   <footer>✨ Un regalo, una sorpresa, un Natale speciale ✨</footer>
 
-  <script src="common.js?v=1"></script>
+  <script src="common.js?v=2"></script>
   <script>
     const message = document.getElementById("message");
     const usersList = document.getElementById("usersList");
@@ -149,6 +161,17 @@
     const drawStatus = document.getElementById("drawStatus");
     const addUserForm = document.getElementById("addUserForm");
     const newChildren = document.getElementById("newChildren");
+    const drawDateInput = document.getElementById("drawDate");
+    const drawDateHint = document.getElementById("drawDateHint");
+    document.getElementById("saveDrawDate").addEventListener("click", async () => {
+      try {
+        const value = drawDateInput.value ? new Date(drawDateInput.value).toISOString() : null;
+        const result = await ssApi("admin_set_draw_date", { draw_date: value });
+        await loadUsers(result.message);
+      } catch (error) {
+        message.textContent = error.message;
+      }
+    });
     const addUserDetails = document.getElementById("addUserDetails");
     const addUserTitle = document.getElementById("addUserTitle");
 
@@ -380,6 +403,15 @@
         const data = await ssApi("admin_list_users");
         currentAccountId = data.current_account_id;
         drawDone = data.draw_done;
+        const shownDate = data.draw_date || data.fallback_draw_date;
+        if (shownDate && document.activeElement !== drawDateInput) {
+          const d = new Date(shownDate);
+          drawDateInput.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+        }
+        drawDateHint.textContent = drawDone
+          ? "Estrazione fatta: il countdown conta fino al 25 dicembre alle 00:00."
+          : (data.draw_date ? "Il countdown conta fino a questa data."
+            : "Data non impostata: si usa la scadenza delle iscrizioni.");
         renderUsers(data.users);
         drawStatus.textContent = drawDone
           ? "L'estrazione è stata fatta. Finché non la resetti non si possono aggiungere né eliminare persone (figli compresi). Ripeterla cancella le assegnazioni e tutte le selezioni dei regali."
@@ -513,5 +545,6 @@
 
     init();
   </script>
+  <script src="countdown.js?v=1" defer></script>
 </body>
 </html>
