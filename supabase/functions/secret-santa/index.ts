@@ -521,6 +521,17 @@ async function removeParticipants(ids: string[], editionId: string) {
     }
   }
 
+  // i divieti che riguardano queste persone non servono più
+  const idList = ids.join(",");
+  const { error: restrictionCleanupError } = await adminClient
+    .from("ss_draw_restrictions")
+    .delete()
+    .eq("edition_id", editionId)
+    .or(`participant_a.in.(${idList}),participant_b.in.(${idList})`);
+  if (restrictionCleanupError) {
+    console.error("Restrictions cleanup:", restrictionCleanupError.message);
+  }
+
   const { error: deleteError } = await adminClient
     .from("ss_participants")
     .delete()
@@ -587,6 +598,58 @@ async function deleteAccountCascade(
   }
 
   return { error: null as string | null, drawAffected: removed.drawAffected };
+}
+
+// Chiave di una coppia vietata: vale in entrambe le direzioni.
+function pairKey(a: string, b: string) {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+// Trova per ogni persona chi deve pescare: mai sé stessa, mai un familiare,
+// mai una coppia vietata. Restituisce null se non esiste una soluzione.
+function findAssignment<T extends { id: string; account_id: string }>(
+  people: T[],
+  forbidden: Set<string>,
+): T[] | null {
+  const shuffle = <U,>(items: U[]) => {
+    const copy = [...items];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  };
+
+  const allowed = (giver: T, receiver: T) =>
+    giver.account_id !== receiver.account_id &&
+    !forbidden.has(pairKey(giver.id, receiver.id));
+
+  for (let restart = 0; restart < 60; restart++) {
+    const givers = shuffle(people);
+    const used = new Set<string>();
+    const result = new Map<string, T>();
+    let steps = 0;
+
+    const solve = (index: number): boolean => {
+      if (index === givers.length) return true;
+      if (++steps > 20000) return false;
+
+      const giver = givers[index];
+      for (const receiver of shuffle(people)) {
+        if (used.has(receiver.id) || !allowed(giver, receiver)) continue;
+        used.add(receiver.id);
+        result.set(giver.id, receiver);
+        if (solve(index + 1)) return true;
+        used.delete(receiver.id);
+        result.delete(giver.id);
+      }
+      return false;
+    };
+
+    if (solve(0)) return people.map(person => result.get(person.id)!);
+  }
+
+  return null;
 }
 
 async function isDrawDone(editionId: string) {
@@ -1803,6 +1866,15 @@ Deno.serve(async (req: Request) => {
         const assignmentsCount =
           (await loadAssignmentMap(account.edition_id)).size;
 
+        const { data: restrictionRows } = await adminClient
+          .from("ss_draw_restrictions")
+          .select("id, participant_a, participant_b")
+          .eq("edition_id", account.edition_id);
+
+        const nameOf = new Map(
+          (participants ?? []).map(p => [p.id, p.display_name]),
+        );
+
         const { data: editionRow } = await adminClient
           .from("ss_editions")
           .select("draw_date, registration_deadline")
@@ -1823,6 +1895,13 @@ Deno.serve(async (req: Request) => {
           draw_done: (assignmentsCount ?? 0) > 0,
           draw_date: editionRow?.draw_date ?? null,
           fallback_draw_date: editionRow?.registration_deadline ?? null,
+          restrictions: (restrictionRows ?? []).map(row => ({
+            id: row.id,
+            a_id: row.participant_a,
+            b_id: row.participant_b,
+            a_name: nameOf.get(row.participant_a) ?? "?",
+            b_name: nameOf.get(row.participant_b) ?? "?",
+          })),
           users: (accounts ?? []).map(item => ({
             ...item,
             participants: (participants ?? [])
@@ -2281,6 +2360,80 @@ Deno.serve(async (req: Request) => {
         return response({ success: true, entries: entries ?? [] });
       }
 
+      // DIVIETI: due persone che non possono pescarsi (in nessuna direzione)
+      if (action === "admin_add_restriction") {
+        const a = body.participant_a;
+        const b = body.participant_b;
+
+        if (!validText(a) || !validText(b) || a === b) {
+          return response({ error: "Scegli due persone diverse." }, 400);
+        }
+
+        const { data: pair, error: pairError } = await adminClient
+          .from("ss_participants")
+          .select("id, account_id")
+          .eq("edition_id", account.edition_id)
+          .in("id", [a, b]);
+
+        if (pairError || pair?.length !== 2) {
+          return response({ error: "Partecipanti non trovati." }, 400);
+        }
+
+        if (pair[0].account_id === pair[1].account_id) {
+          return response({
+            error: "Sono della stessa famiglia: non possono già pescarsi.",
+          }, 400);
+        }
+
+        const { data: existingRows, error: existingError } = await adminClient
+          .from("ss_draw_restrictions")
+          .select("participant_a, participant_b")
+          .eq("edition_id", account.edition_id);
+
+        if (existingError) {
+          console.error("Add restriction lookup:", existingError.message);
+          return response({
+            error: "Non è stato possibile leggere i divieti. Hai eseguito la migrazione SQL?",
+          }, 500);
+        }
+
+        if ((existingRows ?? []).some(row => pairKey(row.participant_a, row.participant_b) === pairKey(a, b))) {
+          return response({ error: "Questo divieto esiste già." }, 409);
+        }
+
+        const { error: insertError } = await adminClient
+          .from("ss_draw_restrictions")
+          .insert({ edition_id: account.edition_id, participant_a: a, participant_b: b });
+
+        if (insertError) {
+          console.error("Add restriction:", insertError.message);
+          return response({ error: "Non è stato possibile salvare il divieto." }, 500);
+        }
+
+        return response({ success: true });
+      }
+
+      if (action === "admin_remove_restriction") {
+        const restrictionId = body.restriction_id;
+
+        if (!validText(restrictionId)) {
+          return response({ error: "Richiesta non valida." }, 400);
+        }
+
+        const { error: removeError } = await adminClient
+          .from("ss_draw_restrictions")
+          .delete()
+          .eq("id", restrictionId)
+          .eq("edition_id", account.edition_id);
+
+        if (removeError) {
+          console.error("Remove restriction:", removeError.message);
+          return response({ error: "Non è stato possibile togliere il divieto." }, 500);
+        }
+
+        return response({ success: true });
+      }
+
       // DATA DELL'ESTRAZIONE (per il countdown)
       if (action === "admin_set_draw_date") {
         const raw = body.draw_date;
@@ -2337,24 +2490,32 @@ Deno.serve(async (req: Request) => {
           }, 409);
         }
 
-        // Nessuno pesca sé stesso né qualcuno della propria famiglia
-        let receivers: typeof people | null = null;
+        // Divieti decisi dall'admin (es. persone che non si parlano)
+        const { data: restrictionRows, error: restrictionsError } =
+          await adminClient
+            .from("ss_draw_restrictions")
+            .select("participant_a, participant_b")
+            .eq("edition_id", account.edition_id);
 
-        for (let attempt = 0; attempt < 5000 && !receivers; attempt++) {
-          const shuffled = [...people];
-          for (let i = shuffled.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-          }
-
-          if (people.every((p, i) => p.account_id !== shuffled[i].account_id)) {
-            receivers = shuffled;
-          }
+        if (restrictionsError) {
+          console.error("Draw restrictions:", restrictionsError.message);
+          return response({
+            error: "Non è stato possibile leggere i divieti. Hai eseguito la migrazione SQL?",
+          }, 500);
         }
+
+        const forbidden = new Set(
+          (restrictionRows ?? []).map(row =>
+            pairKey(row.participant_a, row.participant_b)
+          ),
+        );
+
+        // Nessuno pesca sé stesso, un familiare o una persona vietata
+        const receivers = findAssignment(people, forbidden);
 
         if (!receivers) {
           return response({
-            error: "Non è possibile fare un'estrazione valida: una famiglia ha troppi partecipanti rispetto agli altri.",
+            error: "Non è possibile fare un'estrazione valida con le famiglie e i divieti attuali. Prova a togliere qualche divieto.",
           }, 400);
         }
 

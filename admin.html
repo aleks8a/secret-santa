@@ -100,6 +100,20 @@
       </div>
       <p class="field-hint" id="drawDateHint"></p>
 
+      <details class="participants-box" id="restrictionsBox">
+        <summary>🚫 Combinazioni vietate</summary>
+        <p class="intro">
+          Scegli due persone che non devono pescarsi (valgono in entrambe le
+          direzioni). I divieti si applicano alla prossima estrazione.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="restrictionA" aria-label="Prima persona" style="flex:1;min-width:140px;margin:0"></select>
+          <select id="restrictionB" aria-label="Seconda persona" style="flex:1;min-width:140px;margin:0"></select>
+        </div>
+        <button type="button" id="addRestriction" class="secondary">Aggiungi divieto</button>
+        <div id="restrictionsList"></div>
+      </details>
+
       <details class="participants-box" id="participantsBox">
         <summary>👥 Chi partecipa all'estrazione</summary>
         <p class="intro" id="participantsHint">
@@ -161,6 +175,20 @@
     const drawStatus = document.getElementById("drawStatus");
     const addUserForm = document.getElementById("addUserForm");
     const newChildren = document.getElementById("newChildren");
+    const restrictionA = document.getElementById("restrictionA");
+    const restrictionB = document.getElementById("restrictionB");
+    const restrictionsList = document.getElementById("restrictionsList");
+    document.getElementById("addRestriction").addEventListener("click", async () => {
+      try {
+        await ssApi("admin_add_restriction", {
+          participant_a: restrictionA.value,
+          participant_b: restrictionB.value
+        });
+        await loadUsers("Divieto aggiunto.");
+      } catch (error) {
+        message.textContent = error.message;
+      }
+    });
     const drawDateInput = document.getElementById("drawDate");
     const drawDateHint = document.getElementById("drawDateHint");
     document.getElementById("saveDrawDate").addEventListener("click", async () => {
@@ -238,6 +266,58 @@
       requested.forEach(user => requestsList.appendChild(buildUserCard(user, true)));
       users.forEach(user => usersList.appendChild(buildUserCard(user, false)));
       renderParticipants(users);
+    }
+
+    function renderRestrictions(users, restrictions) {
+      const selects = [restrictionA, restrictionB];
+      const previous = selects.map(sel => sel.value);
+
+      selects.forEach(sel => sel.replaceChildren());
+      users.forEach(user => {
+        user.participants.filter(p => !p.excluded_from_draw).forEach(p => {
+          const label = p.display_name + (p.display_name === user.login_name ? "" : " (" + user.login_name + ")");
+          selects.forEach(sel => {
+            const option = document.createElement("option");
+            option.value = p.id;
+            option.textContent = label;
+            sel.appendChild(option);
+          });
+        });
+      });
+      selects.forEach((sel, i) => { if (previous[i]) sel.value = previous[i]; });
+      if (restrictionA.value === restrictionB.value && restrictionB.options.length > 1) {
+        restrictionB.selectedIndex = 1;
+      }
+
+      restrictionsList.replaceChildren();
+      if (!restrictions.length) {
+        const none = document.createElement("p");
+        none.textContent = "Nessun divieto.";
+        restrictionsList.appendChild(none);
+      }
+      restrictions.forEach(r => {
+        const row = document.createElement("div");
+        row.className = "child-row";
+        const name = document.createElement("span");
+        name.className = "child-name";
+        name.textContent = "🚫 " + r.a_name + " ⇄ " + r.b_name;
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "danger";
+        del.textContent = "Togli";
+        del.addEventListener("click", async () => {
+          del.disabled = true;
+          try {
+            await ssApi("admin_remove_restriction", { restriction_id: r.id });
+            await loadUsers("Divieto tolto.");
+          } catch (error) {
+            message.textContent = error.message;
+            del.disabled = false;
+          }
+        });
+        row.append(name, del);
+        restrictionsList.appendChild(row);
+      });
     }
 
     function renderParticipants(users) {
@@ -413,6 +493,7 @@
           : (data.draw_date ? "Il countdown conta fino a questa data."
             : "Data non impostata: si usa la scadenza delle iscrizioni.");
         renderUsers(data.users);
+        renderRestrictions(data.users, data.restrictions || []);
         drawStatus.textContent = drawDone
           ? "L'estrazione è stata fatta. Finché non la resetti non si possono aggiungere né eliminare persone (figli compresi). Ripeterla cancella le assegnazioni e tutte le selezioni dei regali."
           : "L'estrazione non è ancora stata fatta. Falla quando tutti sono iscritti: nessuno pesca sé stesso o un familiare.";
