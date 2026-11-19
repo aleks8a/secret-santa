@@ -52,6 +52,11 @@
     .child-row button { margin: 0; width: auto; padding: 4px 10px; font-size: 12px; }
     .participants-box { margin-top: 14px; }
     .participants-box summary { cursor: pointer; font-weight: bold; font-size: 15px; padding: 8px 0; }
+    .restriction-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .restriction-columns h4 { margin: 8px 0 0; font-size: 13px; }
+    .restriction-rule { margin-top: 8px; padding: 8px 12px; background: #fafaf7; border: 1px solid #e3e9df; border-radius: 10px; font-size: 14px; }
+    .restriction-rule .chip { display: inline-flex; align-items: center; gap: 4px; margin: 4px 6px 0 0; padding: 2px 4px 2px 10px; border-radius: 999px; background: #f1dede; font-size: 13px; }
+    .restriction-rule .chip button { margin: 0; width: auto; padding: 0 6px; font-size: 14px; background: none; border: 0; color: #a02020; cursor: pointer; }
     .family-group { margin-top: 8px; padding: 8px 12px; background: #fafaf7; border: 1px solid #e3e9df; border-radius: 10px; }
     .family-group h4 { margin: 0 0 4px; font-size: 13px; color: var(--green); }
     .family-group label { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 4px 0; font-weight: normal; }
@@ -101,16 +106,24 @@
       <p class="field-hint" id="drawDateHint"></p>
 
       <details class="participants-box" id="restrictionsBox">
-        <summary>🚫 Combinazioni vietate</summary>
+        <summary>🚫 Divieti di estrazione</summary>
         <p class="intro">
-          Scegli due persone che non devono pescarsi (valgono in entrambe le
-          direzioni). I divieti si applicano alla prossima estrazione.
+          Spunta chi <b>non può pescare</b> e chi <b>non può essere pescato</b>:
+          nessuno del primo gruppo pescherà qualcuno del secondo. Vale in un
+          solo senso (chi è nel secondo gruppo può comunque pescare quelli del
+          primo). I divieti si applicano alla prossima estrazione.
         </p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <select id="restrictionA" aria-label="Prima persona" style="flex:1;min-width:140px;margin:0"></select>
-          <select id="restrictionB" aria-label="Seconda persona" style="flex:1;min-width:140px;margin:0"></select>
+        <div class="restriction-columns">
+          <div>
+            <h4>Non può pescare</h4>
+            <div id="restrictionGivers" class="family-group"></div>
+          </div>
+          <div>
+            <h4>Non può essere pescato</h4>
+            <div id="restrictionReceivers" class="family-group"></div>
+          </div>
         </div>
-        <button type="button" id="addRestriction" class="secondary">Aggiungi divieto</button>
+        <button type="button" id="addRestriction" class="secondary">Aggiungi divieti</button>
         <div id="restrictionsList"></div>
       </details>
 
@@ -175,16 +188,25 @@
     const drawStatus = document.getElementById("drawStatus");
     const addUserForm = document.getElementById("addUserForm");
     const newChildren = document.getElementById("newChildren");
-    const restrictionA = document.getElementById("restrictionA");
-    const restrictionB = document.getElementById("restrictionB");
+    const restrictionGivers = document.getElementById("restrictionGivers");
+    const restrictionReceivers = document.getElementById("restrictionReceivers");
     const restrictionsList = document.getElementById("restrictionsList");
     document.getElementById("addRestriction").addEventListener("click", async () => {
+      const values = list => [...list.querySelectorAll("input:checked")].map(i => i.value);
+      const givers = values(restrictionGivers);
+      const receivers = values(restrictionReceivers);
+
+      if (!givers.length || !receivers.length) {
+        message.textContent = "Spunta almeno una persona in ciascuna colonna.";
+        return;
+      }
+
       try {
-        await ssApi("admin_add_restriction", {
-          participant_a: restrictionA.value,
-          participant_b: restrictionB.value
-        });
-        await loadUsers("Divieto aggiunto.");
+        const result = await ssApi("admin_add_restriction", { givers, receivers });
+        // si svuotano le spunte dopo l'aggiunta
+        [restrictionGivers, restrictionReceivers].forEach(list =>
+          list.querySelectorAll("input:checked").forEach(i => { i.checked = false; }));
+        await loadUsers(result.added + " divieti aggiunti.");
       } catch (error) {
         message.textContent = error.message;
       }
@@ -269,55 +291,76 @@
     }
 
     function renderRestrictions(users, restrictions) {
-      const selects = [restrictionA, restrictionB];
-      const previous = selects.map(sel => sel.value);
+      const lists = [restrictionGivers, restrictionReceivers];
+      const checked = lists.map(list =>
+        new Set([...list.querySelectorAll("input:checked")].map(i => i.value)));
 
-      selects.forEach(sel => sel.replaceChildren());
-      users.forEach(user => {
-        user.participants.filter(p => !p.excluded_from_draw).forEach(p => {
-          const label = p.display_name + (p.display_name === user.login_name ? "" : " (" + user.login_name + ")");
-          selects.forEach(sel => {
-            const option = document.createElement("option");
-            option.value = p.id;
-            option.textContent = label;
-            sel.appendChild(option);
+      lists.forEach((list, index) => {
+        list.replaceChildren();
+        users.forEach(user => {
+          user.participants.filter(p => !p.excluded_from_draw).forEach(p => {
+            const label = document.createElement("label");
+            const box = document.createElement("input");
+            box.type = "checkbox";
+            box.value = p.id;
+            box.checked = checked[index].has(p.id);
+            const name = document.createElement("span");
+            name.textContent = p.display_name +
+              (p.display_name === user.login_name ? "" : " (" + user.login_name + ")");
+            label.append(box, name);
+            list.appendChild(label);
           });
         });
       });
-      selects.forEach((sel, i) => { if (previous[i]) sel.value = previous[i]; });
-      if (restrictionA.value === restrictionB.value && restrictionB.options.length > 1) {
-        restrictionB.selectedIndex = 1;
-      }
 
+      // un riquadro per chi non può pescare, con le persone vietate
       restrictionsList.replaceChildren();
       if (!restrictions.length) {
         const none = document.createElement("p");
         none.textContent = "Nessun divieto.";
         restrictionsList.appendChild(none);
       }
+
+      const byGiver = new Map();
       restrictions.forEach(r => {
-        const row = document.createElement("div");
-        row.className = "child-row";
-        const name = document.createElement("span");
-        name.className = "child-name";
-        name.textContent = "🚫 " + r.a_name + " ⇄ " + r.b_name;
-        const del = document.createElement("button");
-        del.type = "button";
-        del.className = "danger";
-        del.textContent = "Togli";
-        del.addEventListener("click", async () => {
-          del.disabled = true;
-          try {
-            await ssApi("admin_remove_restriction", { restriction_id: r.id });
-            await loadUsers("Divieto tolto.");
-          } catch (error) {
-            message.textContent = error.message;
-            del.disabled = false;
-          }
-        });
-        row.append(name, del);
-        restrictionsList.appendChild(row);
+        if (!byGiver.has(r.a_id)) byGiver.set(r.a_id, { name: r.a_name, items: [] });
+        byGiver.get(r.a_id).items.push(r);
       });
+
+      [...byGiver.values()]
+        .sort((x, y) => x.name.localeCompare(y.name, "it"))
+        .forEach(group => {
+          const rule = document.createElement("div");
+          rule.className = "restriction-rule";
+          const title = document.createElement("div");
+          title.innerHTML = "🚫 <b></b> non può pescare:";
+          title.querySelector("b").textContent = group.name;
+          rule.appendChild(title);
+
+          group.items.forEach(r => {
+            const chip = document.createElement("span");
+            chip.className = "chip";
+            chip.append(r.b_name);
+            const del = document.createElement("button");
+            del.type = "button";
+            del.title = "Togli il divieto";
+            del.setAttribute("aria-label", "Togli il divieto verso " + r.b_name);
+            del.textContent = "✕";
+            del.addEventListener("click", async () => {
+              del.disabled = true;
+              try {
+                await ssApi("admin_remove_restriction", { restriction_id: r.id });
+                await loadUsers("Divieto tolto.");
+              } catch (error) {
+                message.textContent = error.message;
+                del.disabled = false;
+              }
+            });
+            chip.appendChild(del);
+            rule.appendChild(chip);
+          });
+          restrictionsList.appendChild(rule);
+        });
     }
 
     function renderParticipants(users) {
