@@ -600,13 +600,13 @@ async function deleteAccountCascade(
   return { error: null as string | null, drawAffected: removed.drawAffected };
 }
 
-// Chiave di una coppia vietata: vale in entrambe le direzioni.
-function pairKey(a: string, b: string) {
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
+// Chiave di un divieto: vale in un solo senso (chi pesca > chi viene pescato).
+function pairKey(giver: string, receiver: string) {
+  return `${giver}>${receiver}`;
 }
 
 // Trova per ogni persona chi deve pescare: mai sé stessa, mai un familiare,
-// mai una coppia vietata. Restituisce null se non esiste una soluzione.
+// mai un divieto (il divieto "A non può pescare B" non vieta "B pesca A"). Restituisce null se non esiste una soluzione.
 function findAssignment<T extends { id: string; account_id: string }>(
   people: T[],
   forbidden: Set<string>,
@@ -2360,30 +2360,35 @@ Deno.serve(async (req: Request) => {
         return response({ success: true, entries: entries ?? [] });
       }
 
-      // DIVIETI: due persone che non possono pescarsi (in nessuna direzione)
+      // DIVIETI (a senso unico): ognuno dei "givers" non può pescare
+      // nessuno dei "receivers". Il contrario resta permesso.
       if (action === "admin_add_restriction") {
-        const a = body.participant_a;
-        const b = body.participant_b;
+        const givers = body.givers;
+        const receivers = body.receivers;
 
-        if (!validText(a) || !validText(b) || a === b) {
-          return response({ error: "Scegli due persone diverse." }, 400);
+        if (
+          !Array.isArray(givers) || !Array.isArray(receivers) ||
+          !givers.length || !receivers.length ||
+          givers.length > 60 || receivers.length > 60 ||
+          ![...givers, ...receivers].every(validText)
+        ) {
+          return response({
+            error: "Scegli chi non può pescare e chi non può essere pescato.",
+          }, 400);
         }
 
-        const { data: pair, error: pairError } = await adminClient
+        const involved = [...new Set([...givers, ...receivers])];
+        const { data: people, error: peopleError } = await adminClient
           .from("ss_participants")
           .select("id, account_id")
           .eq("edition_id", account.edition_id)
-          .in("id", [a, b]);
+          .in("id", involved);
 
-        if (pairError || pair?.length !== 2) {
+        if (peopleError || people?.length !== involved.length) {
           return response({ error: "Partecipanti non trovati." }, 400);
         }
 
-        if (pair[0].account_id === pair[1].account_id) {
-          return response({
-            error: "Sono della stessa famiglia: non possono già pescarsi.",
-          }, 400);
-        }
+        const accountOf = new Map(people.map(p => [p.id, p.account_id]));
 
         const { data: existingRows, error: existingError } = await adminClient
           .from("ss_draw_restrictions")
@@ -2397,20 +2402,43 @@ Deno.serve(async (req: Request) => {
           }, 500);
         }
 
-        if ((existingRows ?? []).some(row => pairKey(row.participant_a, row.participant_b) === pairKey(a, b))) {
-          return response({ error: "Questo divieto esiste già." }, 409);
+        const existingKeys = new Set(
+          (existingRows ?? []).map(row => pairKey(row.participant_a, row.participant_b)),
+        );
+
+        // si saltano: sé stessi, familiari (non possono già pescarsi), divieti già presenti
+        const newRows = [];
+        for (const giver of new Set<string>(givers)) {
+          for (const receiver of new Set<string>(receivers)) {
+            if (
+              giver === receiver ||
+              accountOf.get(giver) === accountOf.get(receiver) ||
+              existingKeys.has(pairKey(giver, receiver))
+            ) continue;
+            newRows.push({
+              edition_id: account.edition_id,
+              participant_a: giver,
+              participant_b: receiver,
+            });
+          }
+        }
+
+        if (!newRows.length) {
+          return response({
+            error: "Nessun divieto da aggiungere: sono già presenti oppure riguardano persone della stessa famiglia.",
+          }, 409);
         }
 
         const { error: insertError } = await adminClient
           .from("ss_draw_restrictions")
-          .insert({ edition_id: account.edition_id, participant_a: a, participant_b: b });
+          .insert(newRows);
 
         if (insertError) {
           console.error("Add restriction:", insertError.message);
-          return response({ error: "Non è stato possibile salvare il divieto." }, 500);
+          return response({ error: "Non è stato possibile salvare i divieti." }, 500);
         }
 
-        return response({ success: true });
+        return response({ success: true, added: newRows.length });
       }
 
       if (action === "admin_remove_restriction") {
@@ -2490,7 +2518,7 @@ Deno.serve(async (req: Request) => {
           }, 409);
         }
 
-        // Divieti decisi dall'admin (es. persone che non si parlano)
+        // Divieti decisi dall'admin (es. A non può pescare B)
         const { data: restrictionRows, error: restrictionsError } =
           await adminClient
             .from("ss_draw_restrictions")
@@ -2510,7 +2538,7 @@ Deno.serve(async (req: Request) => {
           ),
         );
 
-        // Nessuno pesca sé stesso, un familiare o una persona vietata
+        // Nessuno pesca sé stesso, un familiare o una persona che gli è vietata
         const receivers = findAssignment(people, forbidden);
 
         if (!receivers) {
